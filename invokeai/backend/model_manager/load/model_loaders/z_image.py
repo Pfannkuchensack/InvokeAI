@@ -10,6 +10,7 @@ import torch
 from transformers import AutoTokenizer, Qwen2VLForConditionalGeneration
 
 from invokeai.backend.model_manager.configs.base import Checkpoint_Config_Base, Diffusers_Config_Base
+from invokeai.backend.model_manager.configs.controlnet import ControlNet_Checkpoint_ZImage_Config
 from invokeai.backend.model_manager.configs.factory import AnyModelConfig
 from invokeai.backend.model_manager.configs.main import Main_GGUF_ZImage_Config
 from invokeai.backend.model_manager.configs.qwen3_encoder import Qwen3Encoder_Qwen3Encoder_Config
@@ -230,3 +231,78 @@ class Qwen3EncoderLoader(ModelLoader):
         raise ValueError(
             f"Only Tokenizer and TextEncoder submodels are supported. Received: {submodel_type.value if submodel_type else 'None'}"
         )
+
+
+@ModelLoaderRegistry.register(base=BaseModelType.ZImage, type=ModelType.ControlNet, format=ModelFormat.Checkpoint)
+class ZImageControlCheckpointModel(ModelLoader):
+    """Class to load Z-Image Control adapter models from safetensors checkpoint.
+
+    Z-Image Control models are standalone adapters containing control layers
+    (control_layers, control_all_x_embedder, control_noise_refiner) that can be
+    combined with a base ZImageTransformer2DModel at runtime for spatial conditioning
+    (Canny, HED, Depth, Pose, MLSD).
+    """
+
+    def _load_model(
+        self,
+        config: AnyModelConfig,
+        submodel_type: Optional[SubModelType] = None,
+    ) -> AnyModel:
+        if not isinstance(config, Checkpoint_Config_Base):
+            raise ValueError("Only CheckpointConfigBase models are supported here.")
+
+        # ControlNet type models don't use submodel_type - load the adapter directly
+        return self._load_control_adapter(config)
+
+    def _load_control_adapter(
+        self,
+        config: AnyModelConfig,
+    ) -> AnyModel:
+        from safetensors.torch import load_file
+
+        from invokeai.backend.z_image.z_image_control_adapter import ZImageControlAdapter
+
+        assert isinstance(config, ControlNet_Checkpoint_ZImage_Config)
+        model_path = Path(config.path)
+
+        # Load the safetensors state dict
+        sd = load_file(model_path)
+
+        # Determine number of control blocks from state dict
+        # Control blocks are named control_layers.0, control_layers.1, etc.
+        control_block_indices = set()
+        for key in sd.keys():
+            if key.startswith("control_layers."):
+                parts = key.split(".")
+                if len(parts) > 1 and parts[1].isdigit():
+                    control_block_indices.add(int(parts[1]))
+        num_control_blocks = len(control_block_indices) if control_block_indices else 6
+
+        # Create an empty control adapter
+        dim = 3840
+        with accelerate.init_empty_weights():
+            model = ZImageControlAdapter(
+                num_control_blocks=num_control_blocks,
+                control_in_dim=16,
+                all_patch_size=(2,),
+                all_f_patch_size=(1,),
+                dim=dim,
+                n_refiner_layers=2,
+                n_heads=30,
+                n_kv_heads=30,
+                norm_eps=1e-05,
+                qk_norm=True,
+            )
+
+        # Load state dict with strict=False to handle missing keys like x_pad_token
+        # Some control adapters may not include x_pad_token in their checkpoint
+        missing_keys, unexpected_keys = model.load_state_dict(sd, assign=True, strict=False)
+
+        # Initialize x_pad_token if it was missing from the checkpoint
+        if "x_pad_token" in missing_keys:
+            import torch.nn as nn
+
+            model.x_pad_token = nn.Parameter(torch.empty(dim))
+            nn.init.normal_(model.x_pad_token, std=0.02)
+
+        return model

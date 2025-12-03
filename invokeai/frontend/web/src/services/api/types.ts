@@ -285,16 +285,16 @@ export const isNonRefinerMainModelConfig = (config: AnyModelConfig): config is M
   return config.type === 'main' && config.base !== 'sdxl-refiner';
 };
 
-export const isCheckpointMainModelConfig = (config: AnyModelConfig): config is CheckpointModelConfig => {
-  return config.type === 'main' && (config.format === 'checkpoint' || config.format === 'bnb_quantized_nf4b');
-};
-
 export const isRefinerMainModelModelConfig = (config: AnyModelConfig): config is MainModelConfig => {
   return config.type === 'main' && config.base === 'sdxl-refiner';
 };
 
-export const isFluxFillMainModelModelConfig = (config: AnyModelConfig): config is MainModelConfig => {
+export const isFluxFillMainModelModelConfig = (config: AnyModelConfig): config is FLUXModelConfig => {
   return config.type === 'main' && config.base === 'flux' && config.variant === 'dev_fill';
+};
+
+export const isFluxDevMainModelConfig = (config: AnyModelConfig): config is FLUXModelConfig => {
+  return config.type === 'main' && config.base === 'flux' && config.variant === 'dev';
 };
 
 export const isZImageDiffusersMainModelConfig = (config: AnyModelConfig): config is MainModelConfig => {
