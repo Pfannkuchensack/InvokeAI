@@ -323,8 +323,14 @@ class Main_Checkpoint_FLUX_Config(Checkpoint_Config_Base, Main_Config_Base, Conf
 
     @classmethod
     def _validate_is_flux(cls, mod: ModelOnDisk) -> None:
+        state_dict = mod.load_state_dict()
+
+        # First, ensure this is NOT a FLUX.2 model
+        if _has_flux2_keys(state_dict):
+            raise NotAMatchError("state dict looks like FLUX.2, not FLUX.1")
+
         if not state_dict_has_any_keys_exact(
-            mod.load_state_dict(),
+            state_dict,
             {
                 "double_blocks.0.img_attn.norm.key_norm.scale",
                 "model.diffusion_model.double_blocks.0.img_attn.norm.key_norm.scale",
@@ -381,11 +387,18 @@ class Main_BnBNF4_FLUX_Config(Checkpoint_Config_Base, Main_Config_Base, Config_B
 
         cls._validate_looks_like_main_model(mod)
 
+        cls._validate_is_not_flux2(mod)
+
         cls._validate_model_looks_like_bnb_quantized(mod)
 
         variant = override_fields.get("variant") or cls._get_variant_or_raise(mod)
 
         return cls(**override_fields, variant=variant)
+
+    @classmethod
+    def _validate_is_not_flux2(cls, mod: ModelOnDisk) -> None:
+        if _has_flux2_keys(mod.load_state_dict()):
+            raise NotAMatchError("state dict looks like FLUX.2, not FLUX.1")
 
     @classmethod
     def _get_variant_or_raise(cls, mod: ModelOnDisk) -> FluxVariantType:
@@ -430,11 +443,18 @@ class Main_GGUF_FLUX_Config(Checkpoint_Config_Base, Main_Config_Base, Config_Bas
 
         cls._validate_looks_like_main_model(mod)
 
+        cls._validate_is_not_flux2(mod)
+
         cls._validate_looks_like_gguf_quantized(mod)
 
         variant = override_fields.get("variant") or cls._get_variant_or_raise(mod)
 
         return cls(**override_fields, variant=variant)
+
+    @classmethod
+    def _validate_is_not_flux2(cls, mod: ModelOnDisk) -> None:
+        if _has_flux2_keys(mod.load_state_dict()):
+            raise NotAMatchError("state dict looks like FLUX.2, not FLUX.1")
 
     @classmethod
     def _get_variant_or_raise(cls, mod: ModelOnDisk) -> FluxVariantType:

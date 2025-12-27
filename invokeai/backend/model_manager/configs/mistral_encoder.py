@@ -20,12 +20,18 @@ from invokeai.backend.model_manager.taxonomy import BaseModelType, ModelFormat, 
 from invokeai.backend.quantization.gguf.ggml_tensor import GGMLTensor
 
 
-def _has_mistral_keys(state_dict: dict[str | int, Any]) -> bool:
-    """Check if state dict contains Mistral model keys.
+def _name_looks_like_mistral(name: str) -> bool:
+    """Check if filename/path suggests this is a Mistral model.
 
-    Mistral models have similar structure to other LLMs but with specific layer naming.
+    Since Mistral and Qwen3 have similar state dict structures,
+    we need to rely on naming conventions for checkpoint files.
     """
-    # Common LLM indicators that also apply to Mistral
+    name_lower = name.lower()
+    return "mistral" in name_lower
+
+
+def _has_llm_keys(state_dict: dict[str | int, Any]) -> bool:
+    """Check if state dict contains LLM model keys (common to Mistral, Qwen, etc.)."""
     pytorch_indicators = ["model.layers.0.", "model.embed_tokens.weight"]
 
     for key in state_dict.keys():
@@ -95,9 +101,14 @@ class MistralEncoder_Checkpoint_Config(Checkpoint_Config_Base, Config_Base):
 
     @classmethod
     def _validate_looks_like_mistral_model(cls, mod: ModelOnDisk) -> None:
-        has_mistral_keys = _has_mistral_keys(mod.load_state_dict())
-        if not has_mistral_keys:
-            raise NotAMatchError("state dict does not look like a Mistral model")
+        # First check name - since LLM state dicts are similar
+        if not _name_looks_like_mistral(mod.path.name):
+            raise NotAMatchError("filename does not suggest a Mistral model")
+
+        # Then verify it has LLM keys
+        has_llm_keys = _has_llm_keys(mod.load_state_dict())
+        if not has_llm_keys:
+            raise NotAMatchError("state dict does not look like an LLM model")
 
     @classmethod
     def _validate_does_not_look_like_gguf_quantized(cls, mod: ModelOnDisk) -> None:
@@ -127,9 +138,14 @@ class MistralEncoder_GGUF_Config(Checkpoint_Config_Base, Config_Base):
 
     @classmethod
     def _validate_looks_like_mistral_model(cls, mod: ModelOnDisk) -> None:
-        has_mistral_keys = _has_mistral_keys(mod.load_state_dict())
-        if not has_mistral_keys:
-            raise NotAMatchError("state dict does not look like a Mistral model")
+        # First check name
+        if not _name_looks_like_mistral(mod.path.name):
+            raise NotAMatchError("filename does not suggest a Mistral model")
+
+        # Then verify it has LLM keys
+        has_llm_keys = _has_llm_keys(mod.load_state_dict())
+        if not has_llm_keys:
+            raise NotAMatchError("state dict does not look like an LLM model")
 
     @classmethod
     def _validate_looks_like_gguf_quantized(cls, mod: ModelOnDisk) -> None:
