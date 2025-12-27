@@ -1047,6 +1047,7 @@
         "typePhraseHere": "Type phrase here",
         "t5Encoder": "T5 Encoder",
         "qwen3Encoder": "Qwen3 Encoder",
+        "mistralEncoder": "Mistral Encoder",
         "zImageVae": "VAE (optional)",
         "zImageVaePlaceholder": "From Qwen3 Source (leave empty)",
         "zImageQwen3Encoder": "Qwen3 Encoder (optional)",

@@ -17,6 +17,7 @@ import {
   isFluxVAEModelConfig,
   isIPAdapterModelConfig,
   isLoRAModelConfig,
+  isMistralEncoderModelConfig,
   isNonRefinerMainModelConfig,
   isQwen3EncoderModelConfig,
   isRefinerMainModelModelConfig,
@@ -57,6 +58,7 @@ export const useVAEModels = () => buildModelsHook(isVAEModelConfigOrSubmodel)();
 export const useFluxVAEModels = () => buildModelsHook(isFluxVAEModelConfig)();
 export const useZImageDiffusersModels = () => buildModelsHook(isZImageDiffusersMainModelConfig)();
 export const useQwen3EncoderModels = () => buildModelsHook(isQwen3EncoderModelConfig)();
+export const useMistralEncoderModels = () => buildModelsHook(isMistralEncoderModelConfig)();
 export const useGlobalReferenceImageModels = buildModelsHook(
   (config) => isIPAdapterModelConfig(config) || isFluxReduxModelConfig(config) || isFluxKontextModelConfig(config)
 );

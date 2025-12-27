@@ -477,6 +477,8 @@ export const {
   vaePrecisionChanged,
   t5EncoderModelSelected,
   clipEmbedModelSelected,
+  flux2MistralEncoderSelected,
+  flux2VAESelected,
   clipLEmbedModelSelected,
   clipGEmbedModelSelected,
   zImageVaeModelSelected,
@@ -544,6 +546,7 @@ const createParamsSelector = <T>(selector: Selector<ParamsState, T>) => createSe
 export const selectBase = createParamsSelector((params) => params.model?.base);
 export const selectIsSDXL = createParamsSelector((params) => params.model?.base === 'sdxl');
 export const selectIsFLUX = createParamsSelector((params) => params.model?.base === 'flux');
+export const selectIsFLUX2 = createParamsSelector((params) => params.model?.base === 'flux2');
 export const selectIsSD3 = createParamsSelector((params) => params.model?.base === 'sd-3');
 export const selectIsCogView4 = createParamsSelector((params) => params.model?.base === 'cogview4');
 export const selectIsZImage = createParamsSelector((params) => params.model?.base === 'z-image');
@@ -562,6 +565,8 @@ export const selectVAEKey = createParamsSelector((params) => params.vae?.key);
 export const selectT5EncoderModel = createParamsSelector((params) => params.t5EncoderModel);
 export const selectCLIPEmbedModel = createParamsSelector((params) => params.clipEmbedModel);
 export const selectCLIPLEmbedModel = createParamsSelector((params) => params.clipLEmbedModel);
+export const selectFLUX2MistralEncoder = createParamsSelector((params) => params.flux2MistralEncoder);
+export const selectFLUX2VAE = createParamsSelector((params) => params.flux2VAE);
 
 export const selectCLIPGEmbedModel = createParamsSelector((params) => params.clipGEmbedModel);
 export const selectZImageVaeModel = createParamsSelector((params) => params.zImageVaeModel);

@@ -5,6 +5,7 @@ import { createMemoizedSelector } from 'app/store/createMemoizedSelector';
 import { useAppSelector } from 'app/store/storeHooks';
 import {
   selectIsFLUX,
+  selectIsFLUX2,
   selectIsSD3,
   selectIsZImage,
   selectParamsSlice,
@@ -15,11 +16,13 @@ import ParamCLIPEmbedModelSelect from 'features/parameters/components/Advanced/P
 import ParamCLIPGEmbedModelSelect from 'features/parameters/components/Advanced/ParamCLIPGEmbedModelSelect';
 import ParamCLIPLEmbedModelSelect from 'features/parameters/components/Advanced/ParamCLIPLEmbedModelSelect';
 import ParamClipSkip from 'features/parameters/components/Advanced/ParamClipSkip';
+import ParamFLUX2MistralEncoderModelSelect from 'features/parameters/components/Advanced/ParamFLUX2MistralEncoderModelSelect';
 import ParamT5EncoderModelSelect from 'features/parameters/components/Advanced/ParamT5EncoderModelSelect';
 import ParamZImageQwen3VaeModelSelect from 'features/parameters/components/Advanced/ParamZImageQwen3VaeModelSelect';
 import ParamSeamlessXAxis from 'features/parameters/components/Seamless/ParamSeamlessXAxis';
 import ParamSeamlessYAxis from 'features/parameters/components/Seamless/ParamSeamlessYAxis';
 import ParamColorCompensation from 'features/parameters/components/VAEModel/ParamColorCompensation';
+import ParamFLUX2VAEModelSelect from 'features/parameters/components/VAEModel/ParamFLUX2VAEModelSelect';
 import ParamFLUXVAEModelSelect from 'features/parameters/components/VAEModel/ParamFLUXVAEModelSelect';
 import ParamVAEModelSelect from 'features/parameters/components/VAEModel/ParamVAEModelSelect';
 import ParamVAEPrecision from 'features/parameters/components/VAEModel/ParamVAEPrecision';
@@ -40,6 +43,7 @@ export const AdvancedSettingsAccordion = memo(() => {
   const vaeKey = useAppSelector(selectVAEKey);
   const { currentData: vaeConfig } = useGetModelConfigQuery(vaeKey ?? skipToken);
   const isFLUX = useAppSelector(selectIsFLUX);
+  const isFLUX2 = useAppSelector(selectIsFLUX2);
   const isSD3 = useAppSelector(selectIsSD3);
   const isZImage = useAppSelector(selectIsZImage);
 
@@ -90,13 +94,13 @@ export const AdvancedSettingsAccordion = memo(() => {
   return (
     <StandaloneAccordion label={t('accordions.advanced.title')} badges={badges} isOpen={isOpen} onToggle={onToggle}>
       <Flex gap={4} alignItems="center" p={4} flexDir="column" data-testid="advanced-settings-accordion">
-        {!isZImage && (
+        {!isZImage && !isFLUX2 && (
           <Flex gap={4} w="full">
             {isFLUX ? <ParamFLUXVAEModelSelect /> : <ParamVAEModelSelect />}
             {!isFLUX && !isSD3 && <ParamVAEPrecision />}
           </Flex>
         )}
-        {!isFLUX && !isSD3 && !isZImage && (
+        {!isFLUX && !isFLUX2 && !isSD3 && !isZImage && (
           <>
             <FormControlGroup formLabelProps={formLabelProps}>
               <ParamClipSkip />
@@ -129,6 +133,12 @@ export const AdvancedSettingsAccordion = memo(() => {
         {isZImage && (
           <FormControlGroup>
             <ParamZImageQwen3VaeModelSelect />
+          </FormControlGroup>
+        )}
+        {isFLUX2 && (
+          <FormControlGroup>
+            <ParamFLUX2VAEModelSelect />
+            <ParamFLUX2MistralEncoderModelSelect />
           </FormControlGroup>
         )}
       </Flex>
