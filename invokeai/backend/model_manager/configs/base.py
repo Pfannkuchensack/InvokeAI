@@ -183,6 +183,17 @@ class Config_Base(ABC, BaseModel):
                 else:
                     raise ValueError("CLIP Embed model config dict must include a 'variant' field")
 
+            # Special case: FLUX.2 models also need the variant to distinguish them.
+            if type_ == ModelType.Main.value and base_ == BaseModelType.Flux2.value:
+                if variant_ := v.get("variant"):
+                    if isinstance(variant_, Enum):
+                        variant_ = variant_.value
+                    elif not isinstance(variant_, str):
+                        raise ValueError("Model config dict 'variant' field must be a string or Enum")
+                    tag_strings.append(variant_)
+                else:
+                    raise ValueError("FLUX.2 model config dict must include a 'variant' field")
+
             return ".".join(tag_strings)
         else:
             raise ValueError(
