@@ -26,6 +26,8 @@ from invokeai.backend.model_manager.taxonomy import (
 )
 
 REGEX_TO_BASE: dict[str, BaseModelType] = {
+    r"flux2": BaseModelType.Flux2,
+    r"flux\.?2": BaseModelType.Flux2,
     r"xl": BaseModelType.StableDiffusionXL,
     r"sd2": BaseModelType.StableDiffusion2,
     r"vae": BaseModelType.StableDiffusion1,
@@ -94,6 +96,12 @@ class VAE_Checkpoint_SDXL_Config(VAE_Checkpoint_Config_Base, Config_Base):
 
 class VAE_Checkpoint_FLUX_Config(VAE_Checkpoint_Config_Base, Config_Base):
     base: Literal[BaseModelType.Flux] = Field(default=BaseModelType.Flux)
+
+
+class VAE_Checkpoint_FLUX2_Config(VAE_Checkpoint_Config_Base, Config_Base):
+    """VAE config for FLUX.2 checkpoint models (32-channel latent space)."""
+
+    base: Literal[BaseModelType.Flux2] = Field(default=BaseModelType.Flux2)
 
 
 class VAE_Diffusers_Config_Base(Diffusers_Config_Base):

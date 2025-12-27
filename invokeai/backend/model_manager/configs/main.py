@@ -779,32 +779,32 @@ class Main_GGUF_ZImage_Config(Checkpoint_Config_Base, Main_Config_Base, Config_B
 def _has_flux2_keys(state_dict: dict[str | int, Any]) -> bool:
     """Check if state dict contains FLUX.2 transformer keys.
 
-    FLUX.2 has:
-    - 8 double-stream blocks (0-7) vs 19 in FLUX.1
-    - 48 single-stream blocks (0-47) vs 38 in FLUX.1
-    - No bias parameters anywhere
-    - Different architecture markers
+    FLUX.2 has unique architecture markers:
+    - `time_guidance_embed` (timestep + guidance embedding)
+    - `double_stream_modulation_img/txt` (shared modulation)
+    - `context_embedder` (instead of txt_in like FLUX.1)
+    - `transformer_blocks` (not double_blocks like FLUX.1)
+    - `single_transformer_blocks` (not single_blocks like FLUX.1)
     """
-    # FLUX.2 specific markers - exactly 8 double blocks
-    flux2_double_block_markers = {
-        "double_blocks.7.img_attn.to_q.weight",
-        "transformer_blocks.7.attn.to_q.weight",
-    }
-    # FLUX.1 has 19 double blocks, so block 8+ would exist
-    flux1_markers = {
-        "double_blocks.8.img_attn.to_q.weight",
-        "double_blocks.18.img_attn.to_q.weight",
+    # FLUX.2 unique keys that don't exist in FLUX.1
+    flux2_unique_keys = {
+        "time_guidance_embed",
+        "double_stream_modulation_img",
+        "double_stream_modulation_txt",
+        "single_stream_modulation",
+        "context_embedder",
     }
 
-    has_flux2_structure = any(
-        any(marker in str(k) for marker in flux2_double_block_markers) for k in state_dict.keys()
-    )
-    has_flux1_structure = any(any(marker in str(k) for marker in flux1_markers) for k in state_dict.keys())
+    for key in state_dict.keys():
+        if isinstance(key, int):
+            continue
+        key_str = str(key)
+        # Check for FLUX.2 unique key prefixes
+        for flux2_key in flux2_unique_keys:
+            if key_str.startswith(flux2_key) or f".{flux2_key}" in key_str:
+                return True
 
-    # FLUX.2 has no bias - check that there are no bias keys
-    has_bias = any("bias" in str(k) and "double_blocks" in str(k) for k in state_dict.keys())
-
-    return has_flux2_structure and not has_flux1_structure and not has_bias
+    return False
 
 
 def _get_flux2_variant(state_dict: dict[str | int, Any]) -> Flux2VariantType | None:
