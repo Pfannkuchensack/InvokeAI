@@ -7,6 +7,7 @@ import { withResult, withResultAsync } from 'common/util/result';
 import { positivePromptAddedToHistory, selectPositivePrompt } from 'features/controlLayers/store/paramsSlice';
 import { prepareLinearUIBatch } from 'features/nodes/util/graph/buildLinearBatchConfig';
 import { buildCogView4Graph } from 'features/nodes/util/graph/generation/buildCogView4Graph';
+import { buildFLUX2Graph } from 'features/nodes/util/graph/generation/buildFLUX2Graph';
 import { buildFLUXGraph } from 'features/nodes/util/graph/generation/buildFLUXGraph';
 import { buildSD1Graph } from 'features/nodes/util/graph/generation/buildSD1Graph';
 import { buildSD3Graph } from 'features/nodes/util/graph/generation/buildSD3Graph';
@@ -41,12 +42,14 @@ const enqueueGenerate = async (store: AppStore, prepend: boolean) => {
       case 'sdxl':
         return await buildSDXLGraph(graphBuilderArg);
       case 'sd-1':
-      case `sd-2`:
+      case 'sd-2':
         return await buildSD1Graph(graphBuilderArg);
-      case `sd-3`:
+      case 'sd-3':
         return await buildSD3Graph(graphBuilderArg);
-      case `flux`:
+      case 'flux':
         return await buildFLUXGraph(graphBuilderArg);
+      case 'flux2':
+        return await buildFLUX2Graph(graphBuilderArg);
       case 'cogview4':
         return await buildCogView4Graph(graphBuilderArg);
       case 'z-image':

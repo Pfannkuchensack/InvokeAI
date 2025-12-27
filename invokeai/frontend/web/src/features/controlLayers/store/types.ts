@@ -625,6 +625,9 @@ export const zParamsState = z.object({
   clipLEmbedModel: zParameterCLIPLEmbedModel.nullable(),
   clipGEmbedModel: zParameterCLIPGEmbedModel.nullable(),
   controlLora: zParameterControlLoRAModel.nullable(),
+  // FLUX.2 model components
+  flux2MistralEncoder: zModelIdentifierField.nullable(),
+  flux2VAE: zParameterVAEModel.nullable(),
   // Z-Image model components - can use separate models or extract from a Diffusers source
   zImageVaeModel: zParameterVAEModel.nullable(), // Optional: Separate FLUX VAE
   zImageQwen3EncoderModel: zModelIdentifierField.nullable(), // Optional: Separate Qwen3 Encoder
@@ -679,6 +682,8 @@ export const getInitialParamsState = (): ParamsState => ({
   clipLEmbedModel: null,
   clipGEmbedModel: null,
   controlLora: null,
+  flux2MistralEncoder: null,
+  flux2VAE: null,
   zImageVaeModel: null,
   zImageQwen3EncoderModel: null,
   zImageQwen3SourceModel: null,

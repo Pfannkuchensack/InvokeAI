@@ -23,6 +23,7 @@ from invokeai.backend.model_manager.configs.identification_utils import (
 from invokeai.backend.model_manager.model_on_disk import ModelOnDisk
 from invokeai.backend.model_manager.taxonomy import (
     BaseModelType,
+    Flux2VariantType,
     FluxVariantType,
     ModelFormat,
     ModelType,
@@ -764,6 +765,188 @@ class Main_GGUF_ZImage_Config(Checkpoint_Config_Base, Main_Config_Base, Config_B
         has_z_image_keys = _has_z_image_keys(mod.load_state_dict())
         if not has_z_image_keys:
             raise NotAMatchError("state dict does not look like a Z-Image model")
+
+    @classmethod
+    def _validate_looks_like_gguf_quantized(cls, mod: ModelOnDisk) -> None:
+        has_ggml_tensors = _has_ggml_tensors(mod.load_state_dict())
+        if not has_ggml_tensors:
+            raise NotAMatchError("state dict does not look like GGUF quantized")
+
+
+# ================== FLUX.2 Model Configs ==================
+
+
+def _has_flux2_keys(state_dict: dict[str | int, Any]) -> bool:
+    """Check if state dict contains FLUX.2 transformer keys.
+
+    FLUX.2 has:
+    - 8 double-stream blocks (0-7) vs 19 in FLUX.1
+    - 48 single-stream blocks (0-47) vs 38 in FLUX.1
+    - No bias parameters anywhere
+    - Different architecture markers
+    """
+    # FLUX.2 specific markers - exactly 8 double blocks
+    flux2_double_block_markers = {
+        "double_blocks.7.img_attn.to_q.weight",
+        "transformer_blocks.7.attn.to_q.weight",
+    }
+    # FLUX.1 has 19 double blocks, so block 8+ would exist
+    flux1_markers = {
+        "double_blocks.8.img_attn.to_q.weight",
+        "double_blocks.18.img_attn.to_q.weight",
+    }
+
+    has_flux2_structure = any(
+        any(marker in str(k) for marker in flux2_double_block_markers) for k in state_dict.keys()
+    )
+    has_flux1_structure = any(any(marker in str(k) for marker in flux1_markers) for k in state_dict.keys())
+
+    # FLUX.2 has no bias - check that there are no bias keys
+    has_bias = any("bias" in str(k) and "double_blocks" in str(k) for k in state_dict.keys())
+
+    return has_flux2_structure and not has_flux1_structure and not has_bias
+
+
+def _get_flux2_variant(state_dict: dict[str | int, Any]) -> Flux2VariantType | None:
+    """Determine FLUX.2 variant from state dict.
+
+    Currently only FLUX.2-dev is available.
+    """
+    # For now, all FLUX.2 models are considered "dev" variant
+    # Future variants (pro, max) may have different markers
+    if _has_flux2_keys(state_dict):
+        return Flux2VariantType.Dev
+    return None
+
+
+class Main_Diffusers_FLUX2_Config(Diffusers_Config_Base, Main_Config_Base, Config_Base):
+    """Model config for FLUX.2 diffusers models."""
+
+    base: Literal[BaseModelType.Flux2] = Field(default=BaseModelType.Flux2)
+    variant: Flux2VariantType = Field(default=Flux2VariantType.Dev)
+
+    @classmethod
+    def from_model_on_disk(cls, mod: ModelOnDisk, override_fields: dict[str, Any]) -> Self:
+        raise_if_not_dir(mod)
+
+        raise_for_override_fields(cls, override_fields)
+
+        # Check for FLUX.2 pipeline class
+        raise_for_class_name(
+            common_config_paths(mod.path),
+            {
+                "Flux2Pipeline",
+            },
+        )
+
+        repo_variant = override_fields.get("repo_variant") or cls._get_repo_variant_or_raise(mod)
+        variant = override_fields.get("variant") or Flux2VariantType.Dev
+
+        return cls(
+            **override_fields,
+            repo_variant=repo_variant,
+            variant=variant,
+        )
+
+
+class Main_Checkpoint_FLUX2_Config(Checkpoint_Config_Base, Main_Config_Base, Config_Base):
+    """Model config for FLUX.2 checkpoint models."""
+
+    format: Literal[ModelFormat.Checkpoint] = Field(default=ModelFormat.Checkpoint)
+    base: Literal[BaseModelType.Flux2] = Field(default=BaseModelType.Flux2)
+    variant: Flux2VariantType = Field(default=Flux2VariantType.Dev)
+
+    @classmethod
+    def from_model_on_disk(cls, mod: ModelOnDisk, override_fields: dict[str, Any]) -> Self:
+        raise_if_not_file(mod)
+
+        raise_for_override_fields(cls, override_fields)
+
+        cls._validate_is_flux2(mod)
+
+        cls._validate_does_not_look_like_bnb_quantized(mod)
+
+        cls._validate_does_not_look_like_gguf_quantized(mod)
+
+        variant = override_fields.get("variant") or cls._get_variant_or_raise(mod)
+
+        return cls(**override_fields, variant=variant)
+
+    @classmethod
+    def _validate_is_flux2(cls, mod: ModelOnDisk) -> None:
+        if not _has_flux2_keys(mod.load_state_dict()):
+            raise NotAMatchError("state dict does not look like a FLUX.2 checkpoint")
+
+    @classmethod
+    def _get_variant_or_raise(cls, mod: ModelOnDisk) -> Flux2VariantType:
+        state_dict = mod.load_state_dict()
+        variant = _get_flux2_variant(state_dict)
+
+        if variant is None:
+            raise NotAMatchError("unable to determine FLUX.2 variant from state dict")
+
+        return variant
+
+    @classmethod
+    def _validate_does_not_look_like_bnb_quantized(cls, mod: ModelOnDisk) -> None:
+        has_bnb_nf4_keys = _has_bnb_nf4_keys(mod.load_state_dict())
+        if has_bnb_nf4_keys:
+            raise NotAMatchError("state dict looks like bnb quantized nf4")
+
+    @classmethod
+    def _validate_does_not_look_like_gguf_quantized(cls, mod: ModelOnDisk) -> None:
+        has_ggml_tensors = _has_ggml_tensors(mod.load_state_dict())
+        if has_ggml_tensors:
+            raise NotAMatchError("state dict looks like GGUF quantized")
+
+
+class Main_BnBNF4_FLUX2_Config(Checkpoint_Config_Base, Main_Config_Base, Config_Base):
+    """Model config for BnB NF4 quantized FLUX.2 models."""
+
+    base: Literal[BaseModelType.Flux2] = Field(default=BaseModelType.Flux2)
+    format: Literal[ModelFormat.BnbQuantizednf4b] = Field(default=ModelFormat.BnbQuantizednf4b)
+    variant: Flux2VariantType = Field(default=Flux2VariantType.Dev)
+
+    @classmethod
+    def from_model_on_disk(cls, mod: ModelOnDisk, override_fields: dict[str, Any]) -> Self:
+        raise_if_not_file(mod)
+
+        raise_for_override_fields(cls, override_fields)
+
+        cls._validate_model_looks_like_bnb_quantized(mod)
+
+        # For BnB quantized, we can't easily detect FLUX.2 vs FLUX.1
+        # so we rely on the user selecting the correct model type
+        variant = override_fields.get("variant") or Flux2VariantType.Dev
+
+        return cls(**override_fields, variant=variant)
+
+    @classmethod
+    def _validate_model_looks_like_bnb_quantized(cls, mod: ModelOnDisk) -> None:
+        has_bnb_nf4_keys = _has_bnb_nf4_keys(mod.load_state_dict())
+        if not has_bnb_nf4_keys:
+            raise NotAMatchError("state dict does not look like bnb quantized nf4")
+
+
+class Main_GGUF_FLUX2_Config(Checkpoint_Config_Base, Main_Config_Base, Config_Base):
+    """Model config for GGUF quantized FLUX.2 models."""
+
+    base: Literal[BaseModelType.Flux2] = Field(default=BaseModelType.Flux2)
+    format: Literal[ModelFormat.GGUFQuantized] = Field(default=ModelFormat.GGUFQuantized)
+    variant: Flux2VariantType = Field(default=Flux2VariantType.Dev)
+
+    @classmethod
+    def from_model_on_disk(cls, mod: ModelOnDisk, override_fields: dict[str, Any]) -> Self:
+        raise_if_not_file(mod)
+
+        raise_for_override_fields(cls, override_fields)
+
+        cls._validate_looks_like_gguf_quantized(mod)
+
+        # For GGUF quantized, we rely on user selecting correct model type
+        variant = override_fields.get("variant") or Flux2VariantType.Dev
+
+        return cls(**override_fields, variant=variant)
 
     @classmethod
     def _validate_looks_like_gguf_quantized(cls, mod: ModelOnDisk) -> None:

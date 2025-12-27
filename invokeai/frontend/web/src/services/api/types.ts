@@ -225,6 +225,11 @@ export const isQwen3EncoderModelConfig = (config: AnyModelConfig): config is Qwe
   return config.type === 'qwen3_encoder';
 };
 
+export const isMistralEncoderModelConfig = (config: AnyModelConfig): boolean => {
+  // Type cast needed until MistralEncoderModelConfig is added to backend
+  return (config.type as string) === 'mistral_encoder';
+};
+
 export const isCLIPEmbedModelConfigOrSubmodel = (
   config: AnyModelConfig,
   excludeSubmodels?: boolean

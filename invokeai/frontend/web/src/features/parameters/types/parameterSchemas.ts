@@ -121,6 +121,11 @@ export const zParameterCLIPGEmbedModel = zModelIdentifierField;
 export type ParameterCLIPGEmbedModel = z.infer<typeof zParameterCLIPGEmbedModel>;
 // #endregion
 
+// #region Mistral Encoder Model
+export const zParameterMistralEncoderModel = zModelIdentifierField;
+export type ParameterMistralEncoderModel = z.infer<typeof zParameterMistralEncoderModel>;
+// #endregion
+
 // #region LoRA Model
 const _zParameterLoRAModel = zModelIdentifierField;
 export type ParameterLoRAModel = z.infer<typeof _zParameterLoRAModel>;

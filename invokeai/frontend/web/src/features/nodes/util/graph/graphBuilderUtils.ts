@@ -210,6 +210,7 @@ const CANVAS_OUTPUT_PREFIX = 'canvas_output';
 export const isMainModelWithoutUnet = (modelLoader: Invocation<MainModelLoaderNodes>) => {
   return (
     modelLoader.type === 'flux_model_loader' ||
+    modelLoader.type === 'flux2_model_loader' ||
     modelLoader.type === 'sd3_model_loader' ||
     modelLoader.type === 'cogview4_model_loader' ||
     modelLoader.type === 'z_image_model_loader'

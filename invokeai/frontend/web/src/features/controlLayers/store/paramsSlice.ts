@@ -30,6 +30,7 @@ import type {
   ParameterCLIPLEmbedModel,
   ParameterControlLoRAModel,
   ParameterGuidance,
+  ParameterMistralEncoderModel,
   ParameterModel,
   ParameterNegativePrompt,
   ParameterPositivePrompt,
@@ -146,6 +147,20 @@ const slice = createSlice({
         return;
       }
       state.clipEmbedModel = result.data;
+    },
+    flux2MistralEncoderSelected: (state, action: PayloadAction<ParameterMistralEncoderModel | null>) => {
+      const result = zParamsState.shape.flux2MistralEncoder.safeParse(action.payload);
+      if (!result.success) {
+        return;
+      }
+      state.flux2MistralEncoder = result.data;
+    },
+    flux2VAESelected: (state, action: PayloadAction<ParameterVAEModel | null>) => {
+      const result = zParamsState.shape.flux2VAE.safeParse(action.payload);
+      if (!result.success) {
+        return;
+      }
+      state.flux2VAE = result.data;
     },
     clipLEmbedModelSelected: (state, action: PayloadAction<ParameterCLIPLEmbedModel | null>) => {
       const result = zParamsState.shape.clipLEmbedModel.safeParse(action.payload);

@@ -293,6 +293,20 @@ class FluxConditioningField(BaseModel):
     )
 
 
+class Flux2ConditioningField(BaseModel):
+    """A FLUX.2 conditioning tensor primitive value.
+
+    FLUX.2 uses Mistral embeddings instead of CLIP + T5.
+    """
+
+    conditioning_name: str = Field(description="The name of conditioning tensor")
+    mask: Optional[TensorField] = Field(
+        default=None,
+        description="The mask associated with this conditioning tensor. Excluded regions should be set to False, "
+        "included regions should be set to True.",
+    )
+
+
 class FluxReduxConditioningField(BaseModel):
     """A FLUX Redux conditioning tensor primitive value"""
 

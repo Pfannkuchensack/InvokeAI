@@ -50,6 +50,17 @@ class FLUXConditioningInfo:
 
 
 @dataclass
+class FLUX2ConditioningInfo:
+    """FLUX.2 conditioning info using Mistral embeddings."""
+
+    mistral_embeds: torch.Tensor
+
+    def to(self, device: torch.device | None = None, dtype: torch.dtype | None = None):
+        self.mistral_embeds = self.mistral_embeds.to(device=device, dtype=dtype)
+        return self
+
+
+@dataclass
 class SD3ConditioningInfo:
     clip_l_pooled_embeds: torch.Tensor
     clip_l_embeds: torch.Tensor
