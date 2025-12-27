@@ -96,6 +96,7 @@ export type T5EncoderBnbQuantizedLlmInt8bModelConfig = Extract<
   { type: 't5_encoder'; format: 'bnb_quantized_int8b' }
 >;
 export type Qwen3EncoderModelConfig = Extract<S['AnyModelConfig'], { type: 'qwen3_encoder' }>;
+export type MistralEncoderModelConfig = Extract<S['AnyModelConfig'], { type: 'mistral_encoder' }>;
 export type SpandrelImageToImageModelConfig = Extract<S['AnyModelConfig'], { type: 'spandrel_image_to_image' }>;
 export type CheckpointModelConfig = Extract<S['AnyModelConfig'], { type: 'main'; format: 'checkpoint' }>;
 type CLIPVisionDiffusersConfig = Extract<S['AnyModelConfig'], { type: 'clip_vision' }>;
@@ -225,9 +226,8 @@ export const isQwen3EncoderModelConfig = (config: AnyModelConfig): config is Qwe
   return config.type === 'qwen3_encoder';
 };
 
-export const isMistralEncoderModelConfig = (config: AnyModelConfig): boolean => {
-  // Type cast needed until MistralEncoderModelConfig is added to backend
-  return (config.type as string) === 'mistral_encoder';
+export const isMistralEncoderModelConfig = (config: AnyModelConfig): config is MistralEncoderModelConfig => {
+  return config.type === 'mistral_encoder';
 };
 
 export const isCLIPEmbedModelConfigOrSubmodel = (
