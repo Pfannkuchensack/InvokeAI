@@ -55,8 +55,9 @@ class Flux2ConditioningInfo:
         )
 
 
-# System message constants for FLUX.2 Mistral encoder
-FLUX2_SYSTEM_MESSAGE = """You are an image captioning assistant. Provide accurate, detailed descriptions of images."""
+# System message from BFL/diffusers for FLUX.2 Mistral encoder
+# https://github.com/black-forest-labs/flux2/blob/main/src/flux2/system_messages.py
+FLUX2_SYSTEM_MESSAGE = """You are an AI that reasons about image descriptions. You give structured responses focusing on object relationships, object attribution and actions without speculation."""
 
 FLUX2_SYSTEM_MESSAGE_UPSAMPLING_T2I = """You are an image upsampling assistant. Generate enhanced, high-resolution versions of the described image."""
 

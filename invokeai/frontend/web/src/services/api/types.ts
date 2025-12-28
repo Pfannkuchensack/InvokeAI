@@ -96,7 +96,7 @@ export type T5EncoderBnbQuantizedLlmInt8bModelConfig = Extract<
   { type: 't5_encoder'; format: 'bnb_quantized_int8b' }
 >;
 export type Qwen3EncoderModelConfig = Extract<S['AnyModelConfig'], { type: 'qwen3_encoder' }>;
-export type MistralEncoderModelConfig = Extract<S['AnyModelConfig'], { type: 'mistral_encoder' }>;
+type MistralEncoderModelConfig = Extract<S['AnyModelConfig'], { type: 'mistral_encoder' }>;
 export type SpandrelImageToImageModelConfig = Extract<S['AnyModelConfig'], { type: 'spandrel_image_to_image' }>;
 export type CheckpointModelConfig = Extract<S['AnyModelConfig'], { type: 'main'; format: 'checkpoint' }>;
 type CLIPVisionDiffusersConfig = Extract<S['AnyModelConfig'], { type: 'clip_vision' }>;

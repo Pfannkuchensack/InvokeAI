@@ -121,6 +121,10 @@ class Flux2DenoiseInvocation(BaseInvocation, WithMetadata, WithBoard):
         le=1.0,
         description="Denoising end point",
     )
+    group_offload: bool = InputField(
+        default=False,
+        description="Enable group offloading for low VRAM GPUs (requires ~8GB VRAM, 32GB RAM). Slower but allows running on smaller GPUs.",
+    )
 
     @torch.no_grad()
     def invoke(self, context: InvocationContext) -> LatentsOutput:
@@ -144,6 +148,16 @@ class Flux2DenoiseInvocation(BaseInvocation, WithMetadata, WithBoard):
         with transformer_info.model_on_device() as (_, transformer):
             device = next(transformer.parameters()).device
             dtype = next(transformer.parameters()).dtype
+
+            # Enable group offloading for low VRAM scenarios
+            # This allows running on GPUs with ~8GB VRAM at the cost of speed
+            if self.group_offload and hasattr(transformer, "enable_group_offload"):
+                transformer.enable_group_offload(
+                    onload_device=device,
+                    offload_device="cpu",
+                    offload_type="leaf_level",
+                    use_stream=True,
+                )
 
             # Generate or load initial latents
             if self.latents is not None:
@@ -206,8 +220,8 @@ class Flux2DenoiseInvocation(BaseInvocation, WithMetadata, WithBoard):
             pos_conditioning = self._load_conditioning(context, self.positive_text_conditioning)
             pos_txt = pos_conditioning.mistral_embeds.to(device=device, dtype=dtype)
 
-            # Generate text position IDs
-            txt_ids = torch.zeros(1, pos_txt.shape[1], 3, device=device, dtype=dtype)
+            # Generate text position IDs (FLUX.2 uses 4D positional encoding)
+            txt_ids = torch.zeros(1, pos_txt.shape[1], 4, device=device, dtype=dtype)
 
             # Load negative conditioning if CFG is enabled
             neg_txt = None
@@ -216,7 +230,7 @@ class Flux2DenoiseInvocation(BaseInvocation, WithMetadata, WithBoard):
             if do_cfg:
                 neg_conditioning = self._load_conditioning(context, self.negative_text_conditioning)
                 neg_txt = neg_conditioning.mistral_embeds.to(device=device, dtype=dtype)
-                neg_txt_ids = torch.zeros(1, neg_txt.shape[1], 3, device=device, dtype=dtype)
+                neg_txt_ids = torch.zeros(1, neg_txt.shape[1], 4, device=device, dtype=dtype)
 
             # Denoising loop
             for i, (t_curr, t_prev) in enumerate(

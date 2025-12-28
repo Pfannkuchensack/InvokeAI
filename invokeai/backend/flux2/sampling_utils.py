@@ -173,6 +173,7 @@ def generate_img_ids(
     """Generate image position IDs for FLUX.2 transformer.
 
     Creates position embeddings for the packed image latents.
+    FLUX.2 uses 4D positional encoding (vs 3D in FLUX.1) with axes_dims_rope=(32,32,32,32).
 
     Args:
         height: Latent height (after packing).
@@ -182,13 +183,14 @@ def generate_img_ids(
         dtype: Target dtype.
 
     Returns:
-        Position IDs tensor of shape (batch_size, seq_len, 3).
+        Position IDs tensor of shape (batch_size, seq_len, 4).
     """
     latent_height = height // 2
     latent_width = width // 2
 
-    # Create grid of positions
-    latent_image_ids = torch.zeros(latent_height, latent_width, 3, device=device, dtype=dtype)
+    # Create grid of positions with 4 dimensions (FLUX.2 uses 4D RoPE)
+    # Dimensions: [batch_indicator, height_pos, width_pos, reserved/depth]
+    latent_image_ids = torch.zeros(latent_height, latent_width, 4, device=device, dtype=dtype)
     latent_image_ids[..., 1] = (
         torch.arange(latent_height, device=device, dtype=dtype)[:, None]
         .expand(-1, latent_width)
@@ -197,8 +199,9 @@ def generate_img_ids(
         torch.arange(latent_width, device=device, dtype=dtype)[None, :]
         .expand(latent_height, -1)
     )
+    # Dimensions 0 and 3 are left as zeros (batch indicator and reserved)
 
-    latent_image_ids = latent_image_ids.reshape(1, latent_height * latent_width, 3)
+    latent_image_ids = latent_image_ids.reshape(1, latent_height * latent_width, 4)
     latent_image_ids = latent_image_ids.expand(batch_size, -1, -1)
 
     return latent_image_ids
