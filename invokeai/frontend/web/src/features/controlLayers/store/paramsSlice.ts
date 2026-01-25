@@ -217,6 +217,23 @@ const slice = createSlice({
       }
       state.kleinQwen3EncoderModel = result.data;
     },
+    devVaeModelSelected: (state, action: PayloadAction<ParameterVAEModel | null>) => {
+      const result = zParamsState.shape.devVaeModel.safeParse(action.payload);
+      if (!result.success) {
+        return;
+      }
+      state.devVaeModel = result.data;
+    },
+    devMistralEncoderModelSelected: (
+      state,
+      action: PayloadAction<{ key: string; name: string; base: string } | null>
+    ) => {
+      const result = zParamsState.shape.devMistralEncoderModel.safeParse(action.payload);
+      if (!result.success) {
+        return;
+      }
+      state.devMistralEncoderModel = result.data;
+    },
     vaePrecisionChanged: (state, action: PayloadAction<ParameterPrecision>) => {
       state.vaePrecision = action.payload;
     },
@@ -465,6 +482,8 @@ const resetState = (state: ParamsState): ParamsState => {
   newState.zImageQwen3SourceModel = oldState.zImageQwen3SourceModel;
   newState.kleinVaeModel = oldState.kleinVaeModel;
   newState.kleinQwen3EncoderModel = oldState.kleinQwen3EncoderModel;
+  newState.devVaeModel = oldState.devVaeModel;
+  newState.devMistralEncoderModel = oldState.devMistralEncoderModel;
   return newState;
 };
 
@@ -508,6 +527,8 @@ export const {
   zImageQwen3SourceModelSelected,
   kleinVaeModelSelected,
   kleinQwen3EncoderModelSelected,
+  devVaeModelSelected,
+  devMistralEncoderModelSelected,
   setClipSkip,
   shouldUseCpuNoiseChanged,
   setColorCompensation,
@@ -574,6 +595,8 @@ export const selectIsSD3 = createParamsSelector((params) => params.model?.base =
 export const selectIsCogView4 = createParamsSelector((params) => params.model?.base === 'cogview4');
 export const selectIsZImage = createParamsSelector((params) => params.model?.base === 'z-image');
 export const selectIsFlux2 = createParamsSelector((params) => params.model?.base === 'flux2');
+// Note: isFlux2Dev and isFlux2Klein require selectMainModelConfig for variant info
+// They are defined after selectMainModelConfig at the end of this file
 export const selectIsFluxKontext = createParamsSelector((params) => {
   if (params.model?.base === 'flux' && params.model?.name.toLowerCase().includes('kontext')) {
     return true;
@@ -596,6 +619,8 @@ export const selectZImageQwen3EncoderModel = createParamsSelector((params) => pa
 export const selectZImageQwen3SourceModel = createParamsSelector((params) => params.zImageQwen3SourceModel);
 export const selectKleinVaeModel = createParamsSelector((params) => params.kleinVaeModel);
 export const selectKleinQwen3EncoderModel = createParamsSelector((params) => params.kleinQwen3EncoderModel);
+export const selectDevVaeModel = createParamsSelector((params) => params.devVaeModel);
+export const selectDevMistralEncoderModel = createParamsSelector((params) => params.devMistralEncoderModel);
 
 export const selectCFGScale = createParamsSelector((params) => params.cfgScale);
 export const selectGuidance = createParamsSelector((params) => params.guidance);
@@ -691,3 +716,20 @@ export const selectMainModelConfig = createSelector(
     return modelConfig;
   }
 );
+
+// FLUX.2 variant selectors - require the full model config to access variant info
+export const selectIsFlux2Dev = createSelector(selectMainModelConfig, (config) => {
+  if (!config || config.base !== 'flux2') {
+    return false;
+  }
+  return 'variant' in config && config.variant === 'dev';
+});
+
+export const selectIsFlux2Klein = createSelector(selectMainModelConfig, (config) => {
+  if (!config || config.base !== 'flux2') {
+    return false;
+  }
+  // Klein variants: klein_4b, klein_9b, klein_9b_base
+  const variant = 'variant' in config ? config.variant : null;
+  return variant === 'klein_4b' || variant === 'klein_9b' || variant === 'klein_9b_base';
+});

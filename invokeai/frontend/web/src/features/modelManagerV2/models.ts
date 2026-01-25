@@ -9,6 +9,7 @@ import {
   isIPAdapterModelConfig,
   isLLaVAModelConfig,
   isLoRAModelConfig,
+  isMistralEncoderModelConfig,
   isNonRefinerMainModelConfig,
   isQwen3EncoderModelConfig,
   isRefinerMainModelModelConfig,
@@ -75,6 +76,11 @@ export const MODEL_CATEGORIES: Record<FilterableModelType, ModelCategoryData> = 
     category: 'qwen3_encoder',
     i18nKey: 'modelManager.qwen3Encoder',
     filter: isQwen3EncoderModelConfig,
+  },
+  mistral_encoder: {
+    category: 'mistral_encoder',
+    i18nKey: 'modelManager.mistralEncoder',
+    filter: isMistralEncoderModelConfig,
   },
   control_lora: {
     category: 'control_lora',
@@ -164,6 +170,7 @@ export const MODEL_TYPE_TO_LONG_NAME: Record<ModelType, string> = {
   spandrel_image_to_image: 'Spandrel (Image to Image)',
   t5_encoder: 'T5 Encoder',
   qwen3_encoder: 'Qwen3 Encoder',
+  mistral_encoder: 'Mistral Encoder',
   clip_embed: 'CLIP Embed',
   siglip: 'SigLIP',
   flux_redux: 'FLUX Redux',

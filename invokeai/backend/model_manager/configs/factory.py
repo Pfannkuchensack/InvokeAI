@@ -77,6 +77,11 @@ from invokeai.backend.model_manager.configs.main import (
     Main_GGUF_ZImage_Config,
     MainModelDefaultSettings,
 )
+from invokeai.backend.model_manager.configs.mistral_encoder import (
+    MistralEncoder_Checkpoint_Config,
+    MistralEncoder_Diffusers_Config,
+    MistralEncoder_GGUF_Config,
+)
 from invokeai.backend.model_manager.configs.qwen3_encoder import (
     Qwen3Encoder_Checkpoint_Config,
     Qwen3Encoder_GGUF_Config,
@@ -220,6 +225,10 @@ AnyModelConfig = Annotated[
         Annotated[Qwen3Encoder_Qwen3Encoder_Config, Qwen3Encoder_Qwen3Encoder_Config.get_tag()],
         Annotated[Qwen3Encoder_Checkpoint_Config, Qwen3Encoder_Checkpoint_Config.get_tag()],
         Annotated[Qwen3Encoder_GGUF_Config, Qwen3Encoder_GGUF_Config.get_tag()],
+        # Mistral Encoder
+        Annotated[MistralEncoder_Diffusers_Config, MistralEncoder_Diffusers_Config.get_tag()],
+        Annotated[MistralEncoder_Checkpoint_Config, MistralEncoder_Checkpoint_Config.get_tag()],
+        Annotated[MistralEncoder_GGUF_Config, MistralEncoder_GGUF_Config.get_tag()],
         # TI - file format
         Annotated[TI_File_SD1_Config, TI_File_SD1_Config.get_tag()],
         Annotated[TI_File_SD2_Config, TI_File_SD2_Config.get_tag()],

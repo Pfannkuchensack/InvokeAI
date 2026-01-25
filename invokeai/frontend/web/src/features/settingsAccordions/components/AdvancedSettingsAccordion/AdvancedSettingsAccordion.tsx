@@ -6,6 +6,8 @@ import { useAppSelector } from 'app/store/storeHooks';
 import {
   selectIsFLUX,
   selectIsFlux2,
+  selectIsFlux2Dev,
+  selectIsFlux2Klein,
   selectIsSD3,
   selectIsZImage,
   selectParamsSlice,
@@ -16,6 +18,7 @@ import ParamCLIPEmbedModelSelect from 'features/parameters/components/Advanced/P
 import ParamCLIPGEmbedModelSelect from 'features/parameters/components/Advanced/ParamCLIPGEmbedModelSelect';
 import ParamCLIPLEmbedModelSelect from 'features/parameters/components/Advanced/ParamCLIPLEmbedModelSelect';
 import ParamClipSkip from 'features/parameters/components/Advanced/ParamClipSkip';
+import ParamFlux2DevModelSelect from 'features/parameters/components/Advanced/ParamFlux2DevModelSelect';
 import ParamFlux2KleinModelSelect from 'features/parameters/components/Advanced/ParamFlux2KleinModelSelect';
 import ParamT5EncoderModelSelect from 'features/parameters/components/Advanced/ParamT5EncoderModelSelect';
 import ParamZImageQwen3VaeModelSelect from 'features/parameters/components/Advanced/ParamZImageQwen3VaeModelSelect';
@@ -43,6 +46,8 @@ export const AdvancedSettingsAccordion = memo(() => {
   const { currentData: vaeConfig } = useGetModelConfigQuery(vaeKey ?? skipToken);
   const isFLUX = useAppSelector(selectIsFLUX);
   const isFlux2 = useAppSelector(selectIsFlux2);
+  const isFlux2Dev = useAppSelector(selectIsFlux2Dev);
+  const isFlux2Klein = useAppSelector(selectIsFlux2Klein);
   const isSD3 = useAppSelector(selectIsSD3);
   const isZImage = useAppSelector(selectIsZImage);
 
@@ -125,7 +130,12 @@ export const AdvancedSettingsAccordion = memo(() => {
             <ParamCLIPEmbedModelSelect />
           </FormControlGroup>
         )}
-        {isFlux2 && (
+        {isFlux2Dev && (
+          <FormControlGroup>
+            <ParamFlux2DevModelSelect />
+          </FormControlGroup>
+        )}
+        {isFlux2Klein && (
           <FormControlGroup>
             <ParamFlux2KleinModelSelect />
           </FormControlGroup>

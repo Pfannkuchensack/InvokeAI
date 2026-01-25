@@ -72,6 +72,7 @@ class ModelType(str, Enum):
     T2IAdapter = "t2i_adapter"
     T5Encoder = "t5_encoder"
     Qwen3Encoder = "qwen3_encoder"
+    MistralEncoder = "mistral_encoder"
     SpandrelImageToImage = "spandrel_image_to_image"
     SigLIP = "siglip"
     FluxRedux = "flux_redux"
@@ -131,6 +132,9 @@ class Flux2VariantType(str, Enum):
 
     Klein9BBase = "klein_9b_base"
     """Flux2 Klein 9B Base variant - undistilled foundation model using Qwen3 8B text encoder."""
+
+    Dev = "dev"
+    """Flux2 Dev variant using Mistral Small 3.1 text encoder."""
 
 
 class Qwen3VariantType(str, Enum):

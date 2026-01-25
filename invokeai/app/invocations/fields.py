@@ -155,6 +155,7 @@ class FieldDescriptions:
     t5_encoder = "T5 tokenizer and text encoder"
     glm_encoder = "GLM (THUDM) tokenizer and text encoder"
     qwen3_encoder = "Qwen3 tokenizer and text encoder"
+    mistral_encoder = "Mistral Small 3.1 tokenizer and text encoder for FLUX.2 Dev"
     clip_embed_model = "CLIP Embed loader"
     clip_g_model = "CLIP-G Embed loader"
     unet = "UNet (scheduler, LoRAs)"

@@ -1,6 +1,8 @@
 import { logger } from 'app/logging/logger';
 import { getPrefixedId } from 'features/controlLayers/konva/util';
 import {
+  selectDevMistralEncoderModel,
+  selectDevVaeModel,
   selectKleinQwen3EncoderModel,
   selectKleinVaeModel,
   selectMainModelConfig,
@@ -50,11 +52,21 @@ export const buildFLUXGraph = async (arg: GraphBuilderArg): Promise<GraphBuilder
 
   const { guidance: baseGuidance, steps, fluxScheduler, fluxVAE, t5EncoderModel, clipEmbedModel } = params;
 
-  // Flux2 (Klein) uses Qwen3 instead of CLIP+T5
-  // VAE and Qwen3 encoder can be extracted from the main Diffusers model or selected separately
+  // Flux2 uses different text encoders based on variant:
+  // - Klein: Qwen3 encoder
+  // - Dev: Mistral encoder
+  // VAE and text encoder can be extracted from the main Diffusers model or selected separately
   const isFlux2 = model.base === 'flux2';
+  const isFlux2Dev = isFlux2 && model.variant === 'dev';
+  const isFlux2Klein = isFlux2 && !isFlux2Dev;
+
+  // Klein models
   const kleinVaeModel = selectKleinVaeModel(state);
   const kleinQwen3EncoderModel = selectKleinQwen3EncoderModel(state);
+
+  // Dev models
+  const devVaeModel = selectDevVaeModel(state);
+  const devMistralEncoderModel = selectDevMistralEncoderModel(state);
 
   if (!isFlux2) {
     assert(t5EncoderModel, 'No T5 Encoder model found in state');
@@ -97,9 +109,17 @@ export const buildFLUXGraph = async (arg: GraphBuilderArg): Promise<GraphBuilder
   const g = new Graph(getPrefixedId('flux_graph'));
 
   // Create model loader and text encoder nodes based on variant
-  // Klein uses Qwen3 instead of CLIP+T5
-  let modelLoader: Invocation<'flux_model_loader'> | Invocation<'flux2_klein_model_loader'>;
-  let posCond: Invocation<'flux_text_encoder'> | Invocation<'flux2_klein_text_encoder'>;
+  // - Standard FLUX: CLIP+T5
+  // - Klein: Qwen3 encoder
+  // - Dev: Mistral encoder
+  let modelLoader:
+    | Invocation<'flux_model_loader'>
+    | Invocation<'flux2_klein_model_loader'>
+    | Invocation<'flux2_dev_model_loader'>;
+  let posCond:
+    | Invocation<'flux_text_encoder'>
+    | Invocation<'flux2_klein_text_encoder'>
+    | Invocation<'flux2_dev_text_encoder'>;
   let denoise: Invocation<'flux_denoise'> | Invocation<'flux2_denoise'>;
   let posCondCollect: Invocation<'collect'> | null = null;
 
@@ -128,7 +148,41 @@ export const buildFLUXGraph = async (arg: GraphBuilderArg): Promise<GraphBuilder
     });
   }
 
-  if (isFlux2) {
+  if (isFlux2Dev) {
+    // Flux2 Dev: Use Mistral-based model loader, text encoder, and dedicated denoise node
+    // VAE and Mistral encoder can be extracted from the main Diffusers model or selected separately
+    modelLoader = g.addNode({
+      type: 'flux2_dev_model_loader',
+      id: getPrefixedId('flux2_dev_model_loader'),
+      model,
+      // Optional: Use separately selected VAE and Mistral encoder models
+      vae_model: devVaeModel ?? undefined,
+      mistral_encoder_model: devMistralEncoderModel ?? undefined,
+    });
+
+    posCond = g.addNode({
+      type: 'flux2_dev_text_encoder',
+      id: getPrefixedId('flux2_dev_text_encoder'),
+    });
+
+    denoise = g.addNode({
+      type: 'flux2_denoise',
+      id: getPrefixedId('flux2_denoise'),
+      num_steps: steps,
+      scheduler: fluxScheduler,
+    });
+
+    // Dev: Connect Mistral encoder outputs
+    const devLoader = modelLoader as Invocation<'flux2_dev_model_loader'>;
+    const devCond = posCond as Invocation<'flux2_dev_text_encoder'>;
+    g.addEdge(devLoader, 'mistral_encoder', devCond, 'mistral_encoder');
+    g.addEdge(devLoader, 'max_seq_len', devCond, 'max_seq_len');
+    g.addEdge(devLoader, 'transformer', denoise, 'transformer');
+    g.addEdge(devLoader, 'vae', denoise, 'vae'); // VAE needed for BN statistics
+    g.addEdge(devLoader, 'vae', l2i, 'vae');
+    g.addEdge(positivePrompt, 'value', devCond, 'prompt');
+    g.addEdge(devCond, 'conditioning', denoise, 'positive_text_conditioning');
+  } else if (isFlux2Klein) {
     // Flux2 Klein: Use Qwen3-based model loader, text encoder, and dedicated denoise node
     // VAE and Qwen3 encoder can be extracted from the main Diffusers model or selected separately
     modelLoader = g.addNode({
@@ -209,7 +263,22 @@ export const buildFLUXGraph = async (arg: GraphBuilderArg): Promise<GraphBuilder
   g.addEdge(denoise, 'latents', l2i, 'latents');
 
   // Metadata
-  if (isFlux2) {
+  if (isFlux2Dev) {
+    // VAE and Mistral encoder can come from the main model or be selected separately
+    const flux2Metadata: Record<string, unknown> = {
+      model: Graph.getModelMetadataField(model),
+      steps,
+      scheduler: fluxScheduler,
+      guidance, // Dev uses guidance like standard FLUX
+    };
+    if (devVaeModel) {
+      flux2Metadata.vae = devVaeModel;
+    }
+    if (devMistralEncoderModel) {
+      flux2Metadata.mistral_encoder = devMistralEncoderModel;
+    }
+    g.upsertMetadata(flux2Metadata);
+  } else if (isFlux2Klein) {
     // VAE and Qwen3 encoder can come from the main model or be selected separately
     const flux2Metadata: Record<string, unknown> = {
       model: Graph.getModelMetadataField(model),
@@ -239,10 +308,13 @@ export const buildFLUXGraph = async (arg: GraphBuilderArg): Promise<GraphBuilder
 
   let canvasOutput: Invocation<ImageOutputNodes> = l2i;
 
-  // Flux2 Klein path
+  // Flux2 path (both Dev and Klein use the same VAE and denoise nodes)
   if (isFlux2) {
     const flux2Denoise = denoise as Invocation<'flux2_denoise'>;
-    const flux2ModelLoader = modelLoader as Invocation<'flux2_klein_model_loader'>;
+    // Model loader can be either Dev or Klein variant
+    const flux2ModelLoader = modelLoader as
+      | Invocation<'flux2_klein_model_loader'>
+      | Invocation<'flux2_dev_model_loader'>;
     const flux2L2i = l2i as Invocation<'flux2_vae_decode'>;
 
     if (generationMode === 'txt2img') {

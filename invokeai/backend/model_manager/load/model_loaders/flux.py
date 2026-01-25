@@ -646,6 +646,20 @@ class FluxDiffusersModel(GenericDiffusersLoader):
 class Flux2DiffusersModel(GenericDiffusersLoader):
     """Class to load FLUX.2 main models in diffusers format (e.g. FLUX.2 Klein)."""
 
+    def _is_bnb_quantized_model(self, submodel_path: Path) -> bool:
+        """Check if a submodel is BNB-quantized by reading its config.json."""
+        config_path = submodel_path / "config.json"
+        if not config_path.exists():
+            return False
+
+        import json
+
+        with open(config_path, "r") as f:
+            config = json.load(f)
+
+        quant_config = config.get("quantization_config", {})
+        return quant_config.get("quant_method") == "bitsandbytes" or quant_config.get("load_in_4bit", False)
+
     def _load_model(
         self,
         config: AnyModelConfig,
@@ -661,7 +675,10 @@ class Flux2DiffusersModel(GenericDiffusersLoader):
         load_class = self.get_hf_load_class(model_path, submodel_type)
         repo_variant = config.repo_variant if isinstance(config, Diffusers_Config_Base) else None
         variant = repo_variant.value if repo_variant else None
-        model_path = model_path / submodel_type.value
+        submodel_path = model_path / submodel_type.value
+
+        # Check if this is a BNB-quantized submodel (e.g. text_encoder in FLUX.2-dev-bnb-4bit)
+        is_bnb_quantized = self._is_bnb_quantized_model(submodel_path)
 
         # We force bfloat16 for FLUX.2 models. This is required for correct inference.
         # We use low_cpu_mem_usage=False to avoid meta tensors for weights not in checkpoint.
@@ -670,25 +687,31 @@ class Flux2DiffusersModel(GenericDiffusersLoader):
         # We use SilenceWarnings to suppress the "guidance_embeds is not expected" warning
         # from diffusers Flux2Transformer2DModel.
         dtype = torch.bfloat16
+
+        # Build load kwargs - BNB-quantized models require device_map for proper loading
+        if is_bnb_quantized:
+            load_kwargs: dict = {
+                "torch_dtype": dtype,
+                "variant": variant,
+                "local_files_only": True,
+                "device_map": "auto",
+            }
+        else:
+            load_kwargs = {
+                "torch_dtype": dtype,
+                "variant": variant,
+                "local_files_only": True,
+                "low_cpu_mem_usage": False,
+            }
+
         with SilenceWarnings():
             try:
-                result: AnyModel = load_class.from_pretrained(
-                    model_path,
-                    torch_dtype=dtype,
-                    variant=variant,
-                    local_files_only=True,
-                    low_cpu_mem_usage=False,
-                )
+                result: AnyModel = load_class.from_pretrained(submodel_path, **load_kwargs)
             except OSError as e:
-                if variant and "no file named" in str(
-                    e
-                ):  # try without the variant, just in case user's preferences changed
-                    result = load_class.from_pretrained(
-                        model_path,
-                        torch_dtype=dtype,
-                        local_files_only=True,
-                        low_cpu_mem_usage=False,
-                    )
+                if variant and "no file named" in str(e):
+                    # try without the variant, just in case user's preferences changed
+                    load_kwargs.pop("variant", None)
+                    result = load_class.from_pretrained(submodel_path, **load_kwargs)
                 else:
                     raise e
 
@@ -697,7 +720,7 @@ class Flux2DiffusersModel(GenericDiffusersLoader):
         # the time embeddings.
         if submodel_type == SubModelType.Transformer and hasattr(result, "time_guidance_embed"):
             # Check if this is a Klein model without guidance (guidance_embeds=False in config)
-            transformer_config_path = model_path / "config.json"
+            transformer_config_path = submodel_path / "config.json"
             if transformer_config_path.exists():
                 import json
 

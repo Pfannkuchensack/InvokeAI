@@ -105,6 +105,7 @@ export const zModelType = z.enum([
   'spandrel_image_to_image',
   't5_encoder',
   'qwen3_encoder',
+  'mistral_encoder',
   'clip_embed',
   'siglip',
   'flux_redux',
@@ -130,7 +131,7 @@ export const zSubModelType = z.enum([
 export const zClipVariantType = z.enum(['large', 'gigantic']);
 export const zModelVariantType = z.enum(['normal', 'inpaint', 'depth']);
 export const zFluxVariantType = z.enum(['dev', 'dev_fill', 'schnell']);
-export const zFlux2VariantType = z.enum(['klein_4b', 'klein_9b', 'klein_9b_base']);
+export const zFlux2VariantType = z.enum(['klein_4b', 'klein_9b', 'klein_9b_base', 'dev']);
 export const zQwen3VariantType = z.enum(['qwen3_4b', 'qwen3_8b']);
 export const zAnyModelVariant = z.union([
   zModelVariantType,
