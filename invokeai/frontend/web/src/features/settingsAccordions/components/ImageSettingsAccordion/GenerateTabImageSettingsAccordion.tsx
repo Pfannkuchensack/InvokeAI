@@ -6,6 +6,7 @@ import {
   selectAspectRatioID,
   selectAspectRatioIsLocked,
   selectHeight,
+  selectModelSupportsSeed,
   selectShouldRandomizeSeed,
   selectWidth,
 } from 'features/controlLayers/store/paramsSlice';
@@ -43,6 +44,7 @@ const selectBadges = createMemoizedSelector(
 export const GenerateTabImageSettingsAccordion = memo(() => {
   const { t } = useTranslation();
   const badges = useAppSelector(selectBadges);
+  const modelSupportsSeed = useAppSelector(selectModelSupportsSeed);
   const { isOpen: isOpenAccordion, onToggle: onToggleAccordion } = useStandaloneAccordionToggle({
     id: 'image-settings-generate-tab',
     defaultIsOpen: true,
@@ -57,7 +59,7 @@ export const GenerateTabImageSettingsAccordion = memo(() => {
     >
       <Flex px={4} pt={4} pb={4} w="full" h="full" flexDir="column" data-testid="image-settings-accordion">
         <Dimensions />
-        <ParamSeed py={3} />
+        {modelSupportsSeed && <ParamSeed py={3} />}
       </Flex>
     </StandaloneAccordion>
   );

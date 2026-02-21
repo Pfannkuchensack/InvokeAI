@@ -7724,11 +7724,20 @@ export type components = {
              * @default false
              */
             supports_guidance?: boolean;
+            /**
+             * Supports Steps
+             * @default false
+             */
+            supports_steps?: boolean;
             /** Max Images Per Request */
             max_images_per_request?: number | null;
             max_image_size?: components["schemas"]["ExternalImageSize"] | null;
             /** Allowed Aspect Ratios */
             allowed_aspect_ratios?: string[] | null;
+            /** Aspect Ratio Sizes */
+            aspect_ratio_sizes?: {
+                [key: string]: components["schemas"]["ExternalImageSize"];
+            } | null;
             /** Max Reference Images */
             max_reference_images?: number | null;
             /**
@@ -14203,14 +14212,14 @@ export type components = {
              * Convert Cache Dir
              * Format: path
              * @description Path to the converted models cache directory (DEPRECATED, but do not delete because it is needed for migration from previous versions).
-             * @default models/.convert_cache
+             * @default models\.convert_cache
              */
             convert_cache_dir?: string;
             /**
              * Download Cache Dir
              * Format: path
              * @description Path to the directory that contains dynamically downloaded models.
-             * @default models/.download_cache
+             * @default models\.download_cache
              */
             download_cache_dir?: string;
             /**
@@ -14504,6 +14513,16 @@ export type components = {
              * @description Base URL override for OpenAI image generation.
              */
             external_openai_base_url?: string | null;
+            /**
+             * External Seedream Api Key
+             * @description API key for Seedream image generation.
+             */
+            external_seedream_api_key?: string | null;
+            /**
+             * External Seedream Base Url
+             * @description Base URL override for Seedream image generation.
+             */
+            external_seedream_base_url?: string | null;
         };
         /**
          * InvokeAIAppConfigWithSetFields
@@ -24295,6 +24314,8 @@ export type components = {
              * @default false
              */
             is_installed?: boolean;
+            capabilities?: components["schemas"]["ExternalModelCapabilities"] | null;
+            default_settings?: components["schemas"]["ExternalApiModelDefaultSettings"] | null;
             /**
              * Previous Names
              * @default []
@@ -24335,6 +24356,8 @@ export type components = {
              * @default false
              */
             is_installed?: boolean;
+            capabilities?: components["schemas"]["ExternalModelCapabilities"] | null;
+            default_settings?: components["schemas"]["ExternalApiModelDefaultSettings"] | null;
             /**
              * Previous Names
              * @default []

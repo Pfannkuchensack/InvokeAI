@@ -5,6 +5,7 @@ import { createMemoizedSelector } from 'app/store/createMemoizedSelector';
 import { useAppSelector } from 'app/store/storeHooks';
 import {
   selectModelSupportsOptimizedDenoising,
+  selectModelSupportsSeed,
   selectShouldRandomizeSeed,
 } from 'features/controlLayers/store/paramsSlice';
 import { selectBbox, selectScaleMethod } from 'features/controlLayers/store/selectors';
@@ -61,6 +62,7 @@ export const CanvasTabImageSettingsAccordion = memo(() => {
     defaultIsOpen: false,
   });
   const modelSupportsOptimizedDenoising = useAppSelector(selectModelSupportsOptimizedDenoising);
+  const modelSupportsSeed = useAppSelector(selectModelSupportsSeed);
 
   return (
     <StandaloneAccordion
@@ -71,7 +73,7 @@ export const CanvasTabImageSettingsAccordion = memo(() => {
     >
       <Flex px={4} pt={4} pb={0} w="full" h="full" flexDir="column" data-testid="image-settings-accordion">
         <BboxSettings />
-        <ParamSeed pt={3} pb={0} />
+        {modelSupportsSeed && <ParamSeed pt={3} pb={0} />}
         <Expander label={t('accordions.advanced.options')} isOpen={isOpenExpander} onToggle={onToggleExpander}>
           <Flex gap={4} pb={4} flexDir="column">
             {modelSupportsOptimizedDenoising && <ParamOptimizedDenoisingToggle />}
