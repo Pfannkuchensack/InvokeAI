@@ -2823,7 +2823,12 @@
             "cropCanvasToBbox": "Crop Canvas to Bbox",
             "copyToClipboard": "Copy to Clipboard",
             "copyCanvasToClipboard": "Copy Canvas to Clipboard",
-            "copyBboxToClipboard": "Copy Bbox to Clipboard"
+            "copyBboxToClipboard": "Copy Bbox to Clipboard",
+            "runWorkflowGroup": "Run Workflow",
+            "runCurrentWorkflow": "Run Current Workflow",
+            "savedWorkflows": "Saved Workflows",
+            "noWorkflowLoaded": "No workflow loaded",
+            "noSavedWorkflows": "No saved workflows"
         },
         "stagingArea": {
             "accept": "Accept",

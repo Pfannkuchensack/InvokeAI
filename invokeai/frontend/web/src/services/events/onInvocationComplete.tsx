@@ -1,6 +1,8 @@
 import { logger } from 'app/logging/logger';
 import type { AppDispatch, AppGetState } from 'app/store/store';
 import { deepClone } from 'common/util/deepClone';
+import { rasterLayerAdded } from 'features/controlLayers/store/canvasSlice';
+import type { CanvasRasterLayerState } from 'features/controlLayers/store/types';
 import {
   selectAutoSwitch,
   selectGalleryView,
@@ -23,11 +25,12 @@ import stableHash from 'stable-hash';
 import type { Param0 } from 'tsafe';
 import { objectEntries } from 'tsafe';
 import type { JsonObject } from 'type-fest';
+import type { PartialDeep } from 'type-fest';
 
 const log = logger('events');
 
 // These nodes are passthrough nodes. They do not add images to the gallery, so we must skip that handling for them.
-const nodeTypeDenylist = ['load_image', 'image'];
+const nodeTypeDenylist = ['load_image', 'image', 'create_raster_layer'];
 
 /**
  * Builds the socket event handler for invocation complete events. Adds output images to the gallery and/or updates
@@ -217,6 +220,42 @@ export const buildOnInvocationComplete = (
     return imageDTOs;
   };
 
+  const handleCreateRasterLayer = (data: S['InvocationCompleteEvent']) => {
+    const result = data.result as Record<string, unknown>;
+    const overrides: PartialDeep<CanvasRasterLayerState> = {
+      name: (result.layer_name as string | null) ?? undefined,
+      opacity: (result.opacity as number) ?? 1,
+      position: {
+        x: (result.position_x as number) ?? 0,
+        y: (result.position_y as number) ?? 0,
+      },
+    };
+
+    // If an image was provided, add it as an image object on the layer
+    const image = result.image as { image_name: string } | null | undefined;
+    if (image) {
+      overrides.objects = [
+        {
+          type: 'image' as const,
+          image: {
+            image_name: image.image_name,
+            width: (result.width as number) ?? 512,
+            height: (result.height as number) ?? 512,
+          },
+        },
+      ];
+    }
+
+    dispatch(
+      rasterLayerAdded({
+        overrides,
+        isSelected: (result.is_selected as boolean) ?? true,
+      })
+    );
+
+    log.info('Created raster layer from create_raster_layer node');
+  };
+
   return async (data: S['InvocationCompleteEvent']) => {
     if (finishedQueueItemIds.has(data.item_id)) {
       log.trace({ data } as JsonObject, `Received event for already-finished queue item ${data.item_id}`);
@@ -234,6 +273,11 @@ export const buildOnInvocationComplete = (
       }
       _nodeExecutionState.outputs.push(data.result);
       upsertExecutionState(_nodeExecutionState.nodeId, _nodeExecutionState);
+    }
+
+    // Handle create_raster_layer node completion - creates a new raster layer in the canvas
+    if (data.invocation.type === 'create_raster_layer') {
+      handleCreateRasterLayer(data);
     }
 
     await addImagesToGallery(data);

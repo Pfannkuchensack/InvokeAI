@@ -1,6 +1,8 @@
-import { Menu, MenuButton, MenuGroup, MenuItem, MenuList } from '@invoke-ai/ui-library';
+import { Menu, MenuButton, MenuDivider, MenuGroup, MenuItem, MenuList } from '@invoke-ai/ui-library';
+import { useAppSelector } from 'app/store/storeHooks';
 import { SubMenuButtonContent, useSubMenu } from 'common/hooks/useSubMenu';
 import { CanvasContextMenuItemsCropCanvasToBbox } from 'features/controlLayers/components/CanvasContextMenu/CanvasContextMenuItemsCropCanvasToBbox';
+import { SavedWorkflowsMenuItems } from 'features/controlLayers/components/CanvasContextMenu/SavedWorkflowsMenuItems';
 import { NewLayerIcon } from 'features/controlLayers/components/common/icons';
 import { useCopyCanvasToClipboard } from 'features/controlLayers/hooks/copyHooks';
 import {
@@ -12,15 +14,18 @@ import {
   useSaveCanvasToGallery,
 } from 'features/controlLayers/hooks/saveCanvasHooks';
 import { useCanvasIsBusy } from 'features/controlLayers/hooks/useCanvasIsBusy';
-import { memo } from 'react';
+import { selectNodes } from 'features/nodes/store/selectors';
+import { useEnqueueWorkflowFromCanvas } from 'features/queue/hooks/useEnqueueWorkflowFromCanvas';
+import { memo, useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { PiCopyBold, PiFloppyDiskBold } from 'react-icons/pi';
+import { PiCopyBold, PiFloppyDiskBold, PiPlayBold } from 'react-icons/pi';
 
 export const CanvasContextMenuGlobalMenuItems = memo(() => {
   const { t } = useTranslation();
   const saveSubMenu = useSubMenu();
   const newSubMenu = useSubMenu();
   const copySubMenu = useSubMenu();
+  const workflowSubMenu = useSubMenu();
   const isBusy = useCanvasIsBusy();
   const saveCanvasToGallery = useSaveCanvasToGallery();
   const saveBboxToGallery = useSaveBboxToGallery();
@@ -30,6 +35,20 @@ export const CanvasContextMenuGlobalMenuItems = memo(() => {
   const newControlLayerFromBbox = useNewControlLayerFromBbox();
   const copyCanvasToClipboard = useCopyCanvasToClipboard('canvas');
   const copyBboxToClipboard = useCopyCanvasToClipboard('bbox');
+  const { enqueueCurrentWorkflow, enqueueSavedWorkflow } = useEnqueueWorkflowFromCanvas();
+  const nodes = useAppSelector(selectNodes);
+  const hasWorkflowNodes = nodes.length > 0;
+
+  const handleRunCurrentWorkflow = useCallback(() => {
+    enqueueCurrentWorkflow(false);
+  }, [enqueueCurrentWorkflow]);
+
+  const handleRunSavedWorkflow = useCallback(
+    (workflowId: string) => {
+      enqueueSavedWorkflow(workflowId, false);
+    },
+    [enqueueSavedWorkflow]
+  );
 
   return (
     <>
@@ -83,6 +102,24 @@ export const CanvasContextMenuGlobalMenuItems = memo(() => {
               <MenuItem icon={<PiCopyBold />} isDisabled={isBusy} onClick={copyBboxToClipboard}>
                 {t('controlLayers.canvasContextMenu.copyBboxToClipboard')}
               </MenuItem>
+            </MenuList>
+          </Menu>
+        </MenuItem>
+        <MenuItem {...workflowSubMenu.parentMenuItemProps} icon={<PiPlayBold />}>
+          <Menu {...workflowSubMenu.menuProps}>
+            <MenuButton {...workflowSubMenu.menuButtonProps}>
+              <SubMenuButtonContent label={t('controlLayers.canvasContextMenu.runWorkflowGroup')} />
+            </MenuButton>
+            <MenuList {...workflowSubMenu.menuListProps} maxH="300px" overflowY="auto">
+              <MenuItem
+                icon={<PiPlayBold />}
+                isDisabled={isBusy || !hasWorkflowNodes}
+                onClick={handleRunCurrentWorkflow}
+              >
+                {t('controlLayers.canvasContextMenu.runCurrentWorkflow')}
+              </MenuItem>
+              <MenuDivider />
+              <SavedWorkflowsMenuItems onSelect={handleRunSavedWorkflow} isBusy={isBusy} />
             </MenuList>
           </Menu>
         </MenuItem>
