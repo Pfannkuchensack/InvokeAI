@@ -33,6 +33,7 @@ import type { JsonObject } from 'type-fest';
 
 import { CanvasBackgroundModule } from './CanvasBackgroundModule';
 import { CanvasCompositionGuideModule } from './CanvasCompositionGuideModule';
+import { CanvasLayerFlatteningModule } from './CanvasLayerFlatteningModule';
 import { CanvasStateApiModule } from './CanvasStateApiModule';
 
 export class CanvasManager extends CanvasModuleBase {
@@ -60,6 +61,7 @@ export class CanvasManager extends CanvasModuleBase {
   cache: CanvasCacheModule;
   entityRenderer: CanvasEntityRendererModule;
   compositor: CanvasCompositorModule;
+  layerFlattening: CanvasLayerFlatteningModule;
   tool: CanvasToolModule;
   stagingArea: CanvasStagingAreaModule;
   compositionGuide: CanvasCompositionGuideModule;
@@ -102,6 +104,7 @@ export class CanvasManager extends CanvasModuleBase {
     this.entityRenderer = new CanvasEntityRendererModule(this);
 
     this.compositor = new CanvasCompositorModule(this);
+    this.layerFlattening = new CanvasLayerFlatteningModule(this);
     this.stagingArea = new CanvasStagingAreaModule(this);
     this.compositionGuide = new CanvasCompositionGuideModule(this);
 
@@ -120,7 +123,12 @@ export class CanvasManager extends CanvasModuleBase {
     );
 
     this.background = new CanvasBackgroundModule(this);
+
+    // Add layers to stage in z-order: background → behind → ahead → preview
+    // The active entity layer is added/removed dynamically by the flattening module.
     this.stage.addLayer(this.background.konva.layer);
+    this.stage.addLayer(this.layerFlattening.konva.behindLayer);
+    this.stage.addLayer(this.layerFlattening.konva.aheadLayer);
 
     this.konva = {
       previewLayer: new Konva.Layer({ listening: true, imageSmoothingEnabled: false }),
@@ -250,6 +258,7 @@ export class CanvasManager extends CanvasModuleBase {
       this.worker,
       this.entityRenderer,
       this.compositor,
+      this.layerFlattening,
       this.stage,
       this.compositionGuide,
     ];

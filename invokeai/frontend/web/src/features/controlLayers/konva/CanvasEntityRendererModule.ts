@@ -112,36 +112,9 @@ export class CanvasEntityRendererModule extends CanvasModuleBase {
       state.selectedEntityIdentifier?.id !== prevState.selectedEntityIdentifier?.id
     ) {
       this.log.trace('Arranging entities');
-
-      let zIndex = 0;
-
-      // Draw order:
-      // 1. Background
-      // 2. Raster layers
-      // 3. Control layers
-      // 4. Regions
-      // 5. Inpaint masks
-      // 6. Preview layer (bbox, staging area, progress image, tool)
-
-      this.manager.background.konva.layer.zIndex(zIndex++);
-
-      for (const { id } of this.manager.stateApi.getRasterLayersState().entities) {
-        this.manager.adapters.rasterLayers.get(id)?.konva.layer.zIndex(zIndex++);
-      }
-
-      for (const { id } of this.manager.stateApi.getControlLayersState().entities) {
-        this.manager.adapters.controlLayers.get(id)?.konva.layer.zIndex(zIndex++);
-      }
-
-      for (const { id } of this.manager.stateApi.getRegionsState().entities) {
-        this.manager.adapters.regionMasks.get(id)?.konva.layer.zIndex(zIndex++);
-      }
-
-      for (const { id } of this.manager.stateApi.getInpaintMasksState().entities) {
-        this.manager.adapters.inpaintMasks.get(id)?.konva.layer.zIndex(zIndex++);
-      }
-
-      this.manager.konva.previewLayer.zIndex(zIndex++);
+      // Delegate to the flattening module which manages the 3-layer system
+      // (behind composite → active entity → ahead composite) and z-index ordering.
+      this.manager.layerFlattening.requestUpdate();
     }
   };
 

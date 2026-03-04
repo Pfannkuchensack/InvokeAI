@@ -257,7 +257,9 @@ export abstract class CanvasEntityAdapterBase<T extends CanvasEntityState, U ext
       }),
     };
 
-    this.manager.stage.addLayer(this.konva.layer);
+    // NOTE: We do NOT add the layer to the stage here. The CanvasLayerFlatteningModule manages
+    // which entity layers are on stage (only the active/selected entity). All other entities are
+    // rendered off-screen and flattened into composite behind/ahead layers.
 
     // We must have the entity state on creation.
     const state = this.manager.stateApi.runSelector(this.selectState);
@@ -446,6 +448,16 @@ export abstract class CanvasEntityAdapterBase<T extends CanvasEntityState, U ext
   };
 
   syncVisibility = rafThrottle(() => {
+    /**
+     * If this entity's layer is not on the stage (i.e., it is managed by the flattening module and is not the
+     * active/selected entity), we skip the visibility toggle on the Konva layer. Instead, notify the flattening
+     * module to re-composite so that any visibility-affecting state change is reflected in the flat composites.
+     */
+    if (!this.konva.layer.getStage()) {
+      this.manager.layerFlattening.requestUpdate();
+      return;
+    }
+
     /**
      * If the entity type is hidden, so should the entity be hidden.
      */

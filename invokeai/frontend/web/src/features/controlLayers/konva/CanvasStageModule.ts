@@ -559,6 +559,10 @@ export class CanvasStageModule extends CanvasModuleBase {
     this.konva.stage.add(layer);
   };
 
+  removeLayer = (layer: Konva.Layer) => {
+    layer.remove();
+  };
+
   /**
    * Gets the rectangle of the stage in the absolute coordinates. This can be used to draw a rect that covers the
    * entire stage.
