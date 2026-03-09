@@ -444,6 +444,7 @@ class Main_Checkpoint_FLUX_Config(Checkpoint_Config_Base, Main_Config_Base, Conf
     base: Literal[BaseModelType.Flux] = Field(default=BaseModelType.Flux)
 
     variant: FluxVariantType = Field()
+    is_bundle: bool = Field(default=False, description="Whether this checkpoint contains VAE and text encoders in addition to the transformer.")
 
     @classmethod
     def from_model_on_disk(cls, mod: ModelOnDisk, override_fields: dict[str, Any]) -> Self:
@@ -461,7 +462,9 @@ class Main_Checkpoint_FLUX_Config(Checkpoint_Config_Base, Main_Config_Base, Conf
 
         variant = override_fields.get("variant") or cls._get_variant_or_raise(mod)
 
-        return cls(**override_fields, variant=variant)
+        is_bundle = cls._detect_bundle(mod)
+
+        return cls(**override_fields, variant=variant, is_bundle=is_bundle)
 
     @classmethod
     def _validate_is_flux(cls, mod: ModelOnDisk) -> None:
@@ -510,6 +513,13 @@ class Main_Checkpoint_FLUX_Config(Checkpoint_Config_Base, Main_Config_Base, Conf
         has_ggml_tensors = _has_ggml_tensors(mod.load_state_dict())
         if has_ggml_tensors:
             raise NotAMatchError("state dict looks like GGUF quantized")
+
+    @classmethod
+    def _detect_bundle(cls, mod: ModelOnDisk) -> bool:
+        """Check if the checkpoint is a bundle containing VAE and text encoders."""
+        from invokeai.backend.model_manager.util.model_util import is_flux_bundle
+
+        return is_flux_bundle(mod.load_state_dict())
 
 
 class Main_Checkpoint_Flux2_Config(Checkpoint_Config_Base, Main_Config_Base, Config_Base):

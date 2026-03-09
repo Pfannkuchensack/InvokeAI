@@ -473,29 +473,42 @@ class T5EncoderCheckpointModel(ModelLoader):
 
 @ModelLoaderRegistry.register(base=BaseModelType.Flux, type=ModelType.Main, format=ModelFormat.Checkpoint)
 class FluxCheckpointModel(ModelLoader):
-    """Class to load main models."""
+    """Class to load main models.
+
+    For bundle checkpoints (is_bundle=True), this loader also supports loading VAE, CLIP-L, and T5-XXL
+    submodels from the same file.
+    """
 
     def _load_model(
         self,
         config: AnyModelConfig,
         submodel_type: Optional[SubModelType] = None,
     ) -> AnyModel:
-        if not isinstance(config, Checkpoint_Config_Base):
-            raise ValueError("Only CheckpointConfigBase models are currently supported here.")
+        if not isinstance(config, Main_Checkpoint_FLUX_Config):
+            raise ValueError("Only Main_Checkpoint_FLUX_Config models are currently supported here.")
 
         match submodel_type:
             case SubModelType.Transformer:
-                return self._load_from_singlefile(config)
+                return self._load_transformer(config)
+            case SubModelType.VAE:
+                return self._load_vae_from_bundle(config)
+            case SubModelType.TextEncoder:
+                return self._load_clip_l_from_bundle(config)
+            case SubModelType.Tokenizer:
+                return self._load_clip_l_tokenizer()
+            case SubModelType.TextEncoder2:
+                return self._load_t5xxl_from_bundle(config)
+            case SubModelType.Tokenizer2:
+                return self._load_t5xxl_tokenizer()
 
         raise ValueError(
-            f"Only Transformer submodels are currently supported. Received: {submodel_type.value if submodel_type else 'None'}"
+            f"Unsupported submodel type: {submodel_type.value if submodel_type else 'None'}"
         )
 
-    def _load_from_singlefile(
+    def _load_transformer(
         self,
-        config: AnyModelConfig,
+        config: Main_Checkpoint_FLUX_Config,
     ) -> AnyModel:
-        assert isinstance(config, Main_Checkpoint_FLUX_Config)
         model_path = Path(config.path)
 
         with accelerate.init_empty_weights():
@@ -511,6 +524,63 @@ class FluxCheckpointModel(ModelLoader):
             sd[k] = sd[k].to(torch.bfloat16)
         model.load_state_dict(sd, assign=True)
         return model
+
+    def _load_vae_from_bundle(self, config: Main_Checkpoint_FLUX_Config) -> AnyModel:
+        from invokeai.backend.model_manager.util.model_util import extract_vae_from_flux_bundle
+
+        sd = load_file(Path(config.path))
+        vae_sd = extract_vae_from_flux_bundle(sd)
+        if not vae_sd:
+            raise ValueError("Bundle checkpoint does not contain VAE weights (vae.* keys)")
+
+        with accelerate.init_empty_weights():
+            model = AutoEncoder(get_flux_ae_params())
+        model.load_state_dict(vae_sd, assign=True)
+
+        # VAE is broken in float16, which mps defaults to
+        if self._torch_dtype == torch.float16:
+            try:
+                vae_dtype = torch.tensor([1.0], dtype=torch.bfloat16, device=self._torch_device).dtype
+            except TypeError:
+                vae_dtype = torch.float32
+        else:
+            vae_dtype = self._torch_dtype
+        model.to(vae_dtype)
+        return model
+
+    def _load_clip_l_from_bundle(self, config: Main_Checkpoint_FLUX_Config) -> AnyModel:
+        from invokeai.backend.model_manager.util.model_util import extract_clip_l_from_flux_bundle
+
+        sd = load_file(Path(config.path))
+        clip_sd = extract_clip_l_from_flux_bundle(sd)
+        if not clip_sd:
+            raise ValueError("Bundle checkpoint does not contain CLIP-L weights (text_encoders.clip_l.* keys)")
+
+        model = CLIPTextModel.from_pretrained(
+            "openai/clip-vit-large-patch14",
+            state_dict=clip_sd,
+        )
+        return model
+
+    def _load_clip_l_tokenizer(self) -> AnyModel:
+        return CLIPTokenizer.from_pretrained("openai/clip-vit-large-patch14")
+
+    def _load_t5xxl_from_bundle(self, config: Main_Checkpoint_FLUX_Config) -> AnyModel:
+        from invokeai.backend.model_manager.util.model_util import extract_t5xxl_from_flux_bundle
+
+        sd = load_file(Path(config.path))
+        t5_sd = extract_t5xxl_from_flux_bundle(sd)
+        if not t5_sd:
+            raise ValueError("Bundle checkpoint does not contain T5-XXL weights (text_encoders.t5xxl.* keys)")
+
+        model = T5EncoderModel.from_pretrained(
+            "google/t5-v1_1-xxl",
+            state_dict=t5_sd,
+        )
+        return model
+
+    def _load_t5xxl_tokenizer(self) -> AnyModel:
+        return T5TokenizerFast.from_pretrained("google/t5-v1_1-xxl", max_length=512)
 
 
 @ModelLoaderRegistry.register(base=BaseModelType.Flux, type=ModelType.Main, format=ModelFormat.GGUFQuantized)

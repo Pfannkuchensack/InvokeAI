@@ -2,7 +2,7 @@
 
 import json
 from pathlib import Path
-from typing import Dict, Optional, Union
+from typing import Any, Dict, Optional, Union
 
 import picklescan.scanner as pscan
 import safetensors
@@ -186,6 +186,55 @@ def convert_bundle_to_flux_transformer_checkpoint(
         del transformer_state_dict[k]
 
     return original_state_dict
+
+
+def extract_vae_from_flux_bundle(state_dict: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    """Extract VAE state dict from a Flux bundle checkpoint.
+
+    Bundle files contain VAE weights with 'vae.' prefix. This function extracts
+    those keys and strips the prefix.
+    """
+    vae_sd: dict[str, torch.Tensor] = {}
+    for k, v in state_dict.items():
+        if k.startswith("vae."):
+            new_key = k[len("vae."):]
+            vae_sd[new_key] = v
+    return vae_sd
+
+
+def extract_clip_l_from_flux_bundle(state_dict: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    """Extract CLIP-L text encoder state dict from a Flux bundle checkpoint.
+
+    Bundle files contain CLIP-L weights with 'text_encoders.clip_l.transformer.' prefix.
+    """
+    clip_sd: dict[str, torch.Tensor] = {}
+    prefix = "text_encoders.clip_l.transformer."
+    for k, v in state_dict.items():
+        if k.startswith(prefix):
+            new_key = k[len(prefix):]
+            clip_sd[new_key] = v
+    return clip_sd
+
+
+def extract_t5xxl_from_flux_bundle(state_dict: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    """Extract T5-XXL text encoder state dict from a Flux bundle checkpoint.
+
+    Bundle files contain T5-XXL weights with 'text_encoders.t5xxl.transformer.' prefix.
+    """
+    t5_sd: dict[str, torch.Tensor] = {}
+    prefix = "text_encoders.t5xxl.transformer."
+    for k, v in state_dict.items():
+        if k.startswith(prefix):
+            new_key = k[len(prefix):]
+            t5_sd[new_key] = v
+    return t5_sd
+
+
+def is_flux_bundle(state_dict: dict[str, Any]) -> bool:
+    """Check if a Flux checkpoint state dict is a bundle containing VAE and text encoders."""
+    has_vae = any(k.startswith("vae.") for k in state_dict.keys())
+    has_text_encoders = any(k.startswith("text_encoders.") for k in state_dict.keys())
+    return has_vae and has_text_encoders
 
 
 def get_clip_variant_type(location: str) -> Optional[ClipVariantType]:
