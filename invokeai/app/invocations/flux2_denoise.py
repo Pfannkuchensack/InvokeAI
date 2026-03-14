@@ -373,15 +373,10 @@ class Flux2DenoiseInvocation(BaseInvocation):
         num_steps = len(timesteps) - 1
         cfg_scale_list = [self.cfg_scale] * num_steps
 
-        # Check if we're doing inpainting (have a mask or a clipped schedule)
-        is_inpainting = self.denoise_mask is not None or self.denoising_start > 1e-5
-
         # Create scheduler with FLUX.2 Klein configuration
-        # For inpainting/img2img, use manual Euler stepping to preserve the exact timestep schedule
-        # For txt2img, use the scheduler with dynamic shifting for optimal results
+        # Use scheduler for both txt2img and img2img to ensure consistent mu shifting
         scheduler = None
-        if self.scheduler in FLUX_SCHEDULER_MAP and not is_inpainting:
-            # Only use scheduler for txt2img - use manual Euler for inpainting to preserve exact timesteps
+        if self.scheduler in FLUX_SCHEDULER_MAP:
             scheduler_class = FLUX_SCHEDULER_MAP[self.scheduler]
             # FlowMatchHeunDiscreteScheduler only supports num_train_timesteps and shift parameters
             # FlowMatchEulerDiscreteScheduler and FlowMatchLCMScheduler support dynamic shifting
