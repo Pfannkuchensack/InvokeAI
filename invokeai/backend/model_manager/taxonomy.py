@@ -132,6 +132,9 @@ class Flux2VariantType(str, Enum):
     Klein9BBase = "klein_9b_base"
     """Flux2 Klein 9B Base variant - undistilled foundation model using Qwen3 8B text encoder."""
 
+    Klein9BKV = "klein_9b_kv"
+    """Flux2 Klein 9B KV variant - supports KV-cached reference image conditioning for faster multi-reference editing."""
+
 
 class ZImageVariantType(str, Enum):
     """Z-Image model variants."""

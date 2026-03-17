@@ -13,6 +13,7 @@ from invokeai.backend.model_manager.configs.clip_embed import get_clip_variant_t
 from invokeai.backend.model_manager.configs.identification_utils import (
     NotAMatchError,
     common_config_paths,
+    get_class_name_from_config_dict_or_raise,
     get_config_dict_or_raise,
     raise_for_class_name,
     raise_for_override_fields,
@@ -82,7 +83,7 @@ class MainModelDefaultSettings(BaseModel):
                     # Undistilled base model needs more steps
                     return cls(steps=28, cfg_scale=1.0, width=1024, height=1024)
                 else:
-                    # Distilled models (Klein 4B, Klein 9B) use fewer steps
+                    # Distilled models (Klein 4B, Klein 9B, Klein 9B KV) use fewer steps
                     return cls(steps=4, cfg_scale=1.0, width=1024, height=1024)
             case _:
                 # TODO(psyche): Do we want defaults for other base types?
@@ -808,6 +809,7 @@ class Main_Diffusers_Flux2_Config(Diffusers_Config_Base, Main_Config_Base, Confi
             common_config_paths(mod.path),
             {
                 "Flux2KleinPipeline",
+                "Flux2KleinKVPipeline",
             },
         )
 
@@ -823,14 +825,14 @@ class Main_Diffusers_Flux2_Config(Diffusers_Config_Base, Main_Config_Base, Confi
 
     @classmethod
     def _get_variant_or_raise(cls, mod: ModelOnDisk) -> Flux2VariantType:
-        """Determine the FLUX.2 variant from the transformer config.
+        """Determine the FLUX.2 variant from the transformer config and pipeline class.
 
         FLUX.2 Klein uses Qwen3 text encoder with larger joint_attention_dim:
         - Klein 4B: joint_attention_dim = 7680 (3×Qwen3-4B hidden size)
-        - Klein 9B/9B Base: joint_attention_dim = 12288 (3×Qwen3-8B hidden size)
+        - Klein 9B/9B Base/9B KV: joint_attention_dim = 12288 (3×Qwen3-8B hidden size)
 
-        To distinguish Klein 9B (distilled) from Klein 9B Base (undistilled),
-        we check guidance_embeds:
+        To distinguish Klein 9B variants:
+        - Klein 9B KV: pipeline class is Flux2KleinKVPipeline (KV-cached reference image conditioning)
         - Klein 9B (distilled): guidance_embeds = False (guidance is "baked in" during distillation)
         - Klein 9B Base (undistilled): guidance_embeds = True (needs guidance at inference)
 
@@ -839,6 +841,13 @@ class Main_Diffusers_Flux2_Config(Diffusers_Config_Base, Main_Config_Base, Confi
         KLEIN_4B_CONTEXT_DIM = 7680  # 3 × 2560
         KLEIN_9B_CONTEXT_DIM = 12288  # 3 × 4096
 
+        # Check pipeline class name from model_index.json to detect KV variant
+        pipeline_class_name: str | None = None
+        try:
+            pipeline_class_name = get_class_name_from_config_dict_or_raise(mod.path / "model_index.json")
+        except NotAMatchError:
+            pass
+
         transformer_config = get_config_dict_or_raise(mod.path / "transformer" / "config.json")
 
         joint_attention_dim = transformer_config.get("joint_attention_dim", 4096)
@@ -846,6 +855,9 @@ class Main_Diffusers_Flux2_Config(Diffusers_Config_Base, Main_Config_Base, Confi
 
         # Determine variant based on joint_attention_dim
         if joint_attention_dim == KLEIN_9B_CONTEXT_DIM:
+            # Klein 9B KV: distinguished by pipeline class name
+            if pipeline_class_name == "Flux2KleinKVPipeline":
+                return Flux2VariantType.Klein9BKV
             # Check guidance_embeds to distinguish distilled from undistilled
             # Klein 9B (distilled): guidance_embeds = False (guidance is baked in)
             # Klein 9B Base (undistilled): guidance_embeds = True (needs guidance)

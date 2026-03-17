@@ -749,6 +749,15 @@ flux2_klein_9b = StarterModel(
     type=ModelType.Main,
 )
 
+flux2_klein_9b_kv = StarterModel(
+    name="FLUX.2 Klein 9B KV (Diffusers)",
+    base=BaseModelType.Flux2,
+    source="black-forest-labs/FLUX.2-klein-9b-kv",
+    description="FLUX.2 Klein 9B KV - supports KV-cached reference image conditioning for up to 2.5x faster "
+    "multi-reference editing. Includes transformer, VAE and Qwen3 encoder. ~52.9GB",
+    type=ModelType.Main,
+)
+
 flux2_klein_9b_fp8 = StarterModel(
     name="FLUX.2 Klein 9B (FP8)",
     base=BaseModelType.Flux2,
@@ -940,6 +949,7 @@ STARTER_MODELS: list[StarterModel] = [
     flux2_klein_4b_single,
     flux2_klein_4b_fp8,
     flux2_klein_9b,
+    flux2_klein_9b_kv,
     flux2_klein_9b_fp8,
     flux2_klein_4b_gguf_q4,
     flux2_klein_4b_gguf_q8,
