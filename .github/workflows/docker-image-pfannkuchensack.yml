@@ -1,11 +1,12 @@
 name: Push Docker Image to ghcr.io from pfannkuchensack-dev
-
 on:
   push:
     branches: [ "pfannkuchensack-dev" ]
-
 jobs:
   build:
+    permissions:
+      contents: read
+      packages: write
     strategy:
       fail-fast: false
       matrix:
@@ -24,6 +25,13 @@ jobs:
         registry: ghcr.io
         username: ${{ github.repository_owner }}
         password: ${{ secrets.GITHUB_TOKEN }}
+    - name: Docker meta
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ghcr.io/${{ github.repository }}
+        tags: |
+          type=sha
     - name: Build container
       timeout-minutes: 40
       id: docker_build
@@ -35,6 +43,7 @@ jobs:
         build-args: |
           GPU_DRIVER=${{ matrix.gpu-driver }}
         push: ${{ github.ref == 'refs/heads/pfannkuchensack-dev' }}
+        tags: ${{ steps.meta.outputs.tags }}
         # cache-from: |
         #   type=gha,scope=${{ github.ref_name }}-${{ matrix.gpu-driver }}
         #   type=gha,scope=main-${{ matrix.gpu-driver }}
