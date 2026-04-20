@@ -96,8 +96,19 @@ export abstract class CanvasEntityAdapterBase<T extends CanvasEntityState, U ext
 
   /**
    * Gets the canvas element for the entity. If `rect` is provided, the canvas will be clipped to that rectangle.
+   *
+   * This returns the *compositor* form of the entity (e.g. fully opaque mask shapes for upload/merge). For the visual
+   * display form (semi-transparent masks via the source-in compositing rect), use `getDisplayCanvas`.
    */
   abstract getCanvas: (rect?: Rect) => HTMLCanvasElement;
+
+  /**
+   * Gets the canvas element for the entity as it appears on the stage (display form). The default delegates to
+   * `getCanvas` — raster/control layers already use `state.opacity` so their compositor form matches their display
+   * form. Mask-type adapters override this to reproduce the `source-in` compositing rect that turns opaque shapes
+   * into semi-transparent overlays on the stage.
+   */
+  getDisplayCanvas: (rect?: Rect) => HTMLCanvasElement = (rect) => this.getCanvas(rect);
 
   /**
    * Gets a hashable representation of the entity's _renderable_ state. This should exclude any properties that are not

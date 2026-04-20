@@ -81,4 +81,11 @@ export class CanvasEntityAdapterInpaintMask extends CanvasEntityAdapterBase<
     const canvas = this.renderer.getCanvas({ rect, attrs });
     return canvas;
   };
+
+  getDisplayCanvas = (rect?: Rect): HTMLCanvasElement => {
+    if (!rect) {
+      return this.getCanvas();
+    }
+    return this.renderer.getDisplayCanvas({ rect, opacity: this.state.opacity });
+  };
 }

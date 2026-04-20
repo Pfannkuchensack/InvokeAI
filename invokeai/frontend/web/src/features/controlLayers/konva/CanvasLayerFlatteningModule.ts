@@ -1,20 +1,25 @@
 import type { CanvasEntityAdapter } from 'features/controlLayers/konva/CanvasEntity/types';
+import {
+  computeFlatHash as _computeFlatHash,
+  computeFlatRect as _computeFlatRect,
+  getStageActiveAdapter as _getStageActiveAdapter,
+  getVisibleAdaptersForFlattening as _getVisibleAdaptersForFlattening,
+  splitAdapters as _splitAdapters,
+} from 'features/controlLayers/konva/CanvasLayerFlattening.logic';
 import type { CanvasManager } from 'features/controlLayers/konva/CanvasManager';
 import { CanvasModuleBase } from 'features/controlLayers/konva/CanvasModuleBase';
-import { getPrefixedId, getRectUnion } from 'features/controlLayers/konva/util';
+import { getPrefixedId } from 'features/controlLayers/konva/util';
 import {
   selectIsolatedLayerPreview,
   selectIsolatedStagingPreview,
 } from 'features/controlLayers/store/canvasSettingsSlice';
 import { selectCanvasSlice } from 'features/controlLayers/store/selectors';
 import type { CanvasEntityState, Rect } from 'features/controlLayers/store/types';
-import { getEntityIdentifier, isRasterLayerEntityIdentifier } from 'features/controlLayers/store/types';
+import { getEntityIdentifier } from 'features/controlLayers/store/types';
 import Konva from 'konva';
 import rafThrottle from 'raf-throttle';
 import type { Logger } from 'roarr';
-import stableHash from 'stable-hash';
 import { assert } from 'tsafe';
-import type { JsonObject } from 'type-fest';
 
 /**
  * Reduces the number of active HTML canvas elements from N (one per entity) to 3 (constant).
@@ -58,6 +63,15 @@ export class CanvasLayerFlatteningModule extends CanvasModuleBase {
    * The ID of the currently active (on-stage) entity adapter.
    */
   private _activeAdapterId: string | null = null;
+
+  /**
+   * Persistent canvas buffers for the behind/ahead composites. Reused across re-flattens to avoid GC pressure
+   * from per-frame `document.createElement('canvas')` during e.g. opacity-slider drags. Each `_update` resizes
+   * and redraws the same canvas; we then force a `batchDraw()` since Konva doesn't detect mutations of an image
+   * whose attribute reference is unchanged.
+   */
+  private _behindBuffer: HTMLCanvasElement | null = null;
+  private _aheadBuffer: HTMLCanvasElement | null = null;
 
   constructor(manager: CanvasManager) {
     super();
@@ -104,6 +118,11 @@ export class CanvasLayerFlatteningModule extends CanvasModuleBase {
     this.subscriptions.add(this.manager.stateApi.$transformingAdapter.listen(this.requestUpdate));
     this.subscriptions.add(this.manager.stateApi.$segmentingAdapter.listen(this.requestUpdate));
 
+    // Stage pan/zoom can change the clipped flat rect when the adapter union exceeds the browser canvas
+    // size limit (see computeFlatRect). The hash encodes the resolved rect, so when no clipping applies
+    // this listener no-ops; when clipping is active it keeps the composite aligned with the viewport.
+    this.subscriptions.add(this.manager.stage.$stageAttrs.listen(this.requestUpdate));
+
     // Subscribe to staging state
     this.subscriptions.add(this.manager.stagingArea.$isStaging.listen(this.requestUpdate));
 
@@ -136,111 +155,65 @@ export class CanvasLayerFlatteningModule extends CanvasModuleBase {
     return adapters;
   };
 
-  /**
-   * Splits all adapters into behind/active/ahead based on the selected entity.
-   */
+  getStageActiveAdapter = (): CanvasEntityAdapter | null =>
+    _getStageActiveAdapter<CanvasEntityAdapter>({
+      filteringAdapter: this.manager.stateApi.$filteringAdapter.get(),
+      transformingAdapter: this.manager.stateApi.$transformingAdapter.get(),
+      segmentingAdapter: this.manager.stateApi.$segmentingAdapter.get(),
+      selectedId: this.manager.stateApi.getCanvasState().selectedEntityIdentifier?.id ?? null,
+      findAdapterById: this.findAdapterById,
+    });
+
   splitAdapters = (): {
     behind: CanvasEntityAdapter[];
     active: CanvasEntityAdapter | null;
     ahead: CanvasEntityAdapter[];
-  } => {
-    const allAdapters = this.getAdaptersInDrawOrder();
-    const selectedId = this.manager.stateApi.getCanvasState().selectedEntityIdentifier?.id ?? null;
+  } => _splitAdapters(this.getAdaptersInDrawOrder(), this.getStageActiveAdapter());
 
-    if (!selectedId) {
-      return { behind: allAdapters, active: null, ahead: [] };
-    }
-
-    const activeIndex = allAdapters.findIndex((a) => a.id === selectedId);
-    if (activeIndex === -1) {
-      return { behind: allAdapters, active: null, ahead: [] };
-    }
-
-    return {
-      behind: allAdapters.slice(0, activeIndex),
-      active: allAdapters[activeIndex]!,
-      ahead: allAdapters.slice(activeIndex + 1),
-    };
-  };
-
-  /**
-   * Filters adapters to only those that should appear in a flattened composite.
-   * Excludes disabled, empty, and type-hidden entities.
-   * Handles isolated staging preview (only raster layers).
-   */
   getVisibleAdaptersForFlattening = (adapters: CanvasEntityAdapter[]): CanvasEntityAdapter[] => {
     const isIsolatedStaging =
       this.manager.stateApi.runSelector(selectIsolatedStagingPreview) && this.manager.stagingArea.$isStaging.get();
-
-    return adapters.filter((adapter) => {
-      // Skip disabled entities
-      if (adapter.$isDisabled.get()) {
-        return false;
-      }
-
-      // Skip empty entities (no objects to render)
-      if (adapter.$isEmpty.get()) {
-        return false;
-      }
-
-      // Skip entities whose type is globally hidden
-      if (this.manager.stateApi.runSelector(adapter.selectIsTypeHidden)) {
-        return false;
-      }
-
-      // During isolated staging preview, only include raster layers
-      if (isIsolatedStaging && !isRasterLayerEntityIdentifier(adapter.entityIdentifier)) {
-        return false;
-      }
-
-      return true;
+    const stateApi = this.manager.stateApi;
+    return _getVisibleAdaptersForFlattening({
+      adapters,
+      isIsolatedStaging,
+      isTypeHidden: (adapter) => stateApi.runSelector(adapter.selectIsTypeHidden),
     });
   };
 
-  /**
-   * Computes a hash for a set of adapters, for change detection.
-   * Same pattern as CanvasCompositorModule.getCompositeHash.
-   */
-  computeFlatHash = (adapters: CanvasEntityAdapter[]): string => {
-    const adapterHashes: JsonObject[] = [];
-    for (const adapter of adapters) {
-      adapterHashes.push(adapter.getHashableState());
-    }
-    return stableHash({ adapterHashes });
-  };
+  computeFlatHash = (adapters: CanvasEntityAdapter[], rect: Rect | null): string => _computeFlatHash(adapters, rect);
+
+  computeFlatRect = (adapters: CanvasEntityAdapter[]): Rect | null =>
+    _computeFlatRect(adapters, this.manager.stage.getScaledStageRect());
 
   /**
-   * Renders a set of adapters into a single flat canvas.
+   * Renders a set of adapters into a single flat canvas at the given rect.
    * Reuses the same compositing pattern as CanvasCompositorModule.getCompositeCanvas.
    *
-   * @returns The flat canvas and its bounding rect, or null if no adapters to render.
+   * If `buffer` is provided, it's resized and drawn into in-place (avoids allocating a new canvas per frame
+   * during e.g. opacity-slider drags). Setting `canvas.width`/`height` resets pixel contents per HTML spec.
+   *
+   * @returns The flat canvas, or null if no adapters to render.
    */
-  flattenToCanvas = (adapters: CanvasEntityAdapter[]): { canvas: HTMLCanvasElement; rect: Rect } | null => {
+  flattenToCanvas = (
+    adapters: CanvasEntityAdapter[],
+    rect: Rect,
+    buffer?: HTMLCanvasElement
+  ): { canvas: HTMLCanvasElement; rect: Rect } | null => {
     if (adapters.length === 0) {
       return null;
     }
 
-    // Compute the union rect of all adapters
-    const rects: Rect[] = [];
-    for (const adapter of adapters) {
-      if (adapter.renderer.hasObjects()) {
-        rects.push(adapter.transformer.getRelativeRect());
-      }
-    }
-
-    if (rects.length === 0) {
-      return null;
-    }
-
-    const rect = getRectUnion(...rects);
-
-    const canvas = document.createElement('canvas');
+    const canvas = buffer ?? document.createElement('canvas');
     canvas.width = rect.width;
     canvas.height = rect.height;
 
     const ctx = canvas.getContext('2d');
     assert(ctx !== null, 'Canvas 2D context is null');
     ctx.imageSmoothingEnabled = false;
+    // Defensive clear: setting width/height to the same value does not reliably reset pixel contents in all
+    // browsers when the canvas is being reused.
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
 
     for (const adapter of adapters) {
       // Apply globalCompositeOperation for raster/control layers (same as CanvasCompositorModule)
@@ -250,7 +223,7 @@ export class CanvasLayerFlatteningModule extends CanvasModuleBase {
           : undefined;
       ctx.globalCompositeOperation = layerCompositeOp || 'source-over';
 
-      const adapterCanvas = adapter.getCanvas(rect);
+      const adapterCanvas = adapter.getDisplayCanvas(rect);
       ctx.drawImage(adapterCanvas, 0, 0);
     }
 
@@ -303,6 +276,9 @@ export class CanvasLayerFlatteningModule extends CanvasModuleBase {
     }
 
     layer.visible(true);
+    // With the canvas-buffer pool, the Konva.Image's `image` attribute keeps the same HTMLCanvasElement
+    // reference across re-flattens. Konva treats that as unchanged and won't auto-redraw, so force it.
+    layer.batchDraw();
   };
 
   /**
@@ -316,7 +292,7 @@ export class CanvasLayerFlatteningModule extends CanvasModuleBase {
 
     // The active entity's layer is on the stage — set its z-index
     if (this._activeAdapterId) {
-      const activeAdapter = this.manager.getAdapter({ id: this._activeAdapterId, type: this.getActiveEntityType() });
+      const activeAdapter = this.findAdapterById(this._activeAdapterId);
       if (activeAdapter && activeAdapter.konva.layer.getStage()) {
         activeAdapter.konva.layer.zIndex(zIndex++);
       }
@@ -324,15 +300,6 @@ export class CanvasLayerFlatteningModule extends CanvasModuleBase {
 
     this.konva.aheadLayer.zIndex(zIndex++);
     this.manager.konva.previewLayer.zIndex(zIndex++);
-  };
-
-  /**
-   * Helper to determine the entity type of the active adapter.
-   * We need this for the getAdapter call which requires a typed identifier.
-   */
-  private getActiveEntityType = (): 'raster_layer' | 'control_layer' | 'inpaint_mask' | 'regional_guidance' => {
-    const selectedId = this.manager.stateApi.getCanvasState().selectedEntityIdentifier;
-    return selectedId?.type ?? 'raster_layer';
   };
 
   /**
@@ -397,20 +364,32 @@ export class CanvasLayerFlatteningModule extends CanvasModuleBase {
 
     // Flatten the behind composite
     const visibleBehind = this.getVisibleAdaptersForFlattening(behind);
-    const behindHash = this.computeFlatHash(visibleBehind);
+    const behindRect = this.computeFlatRect(visibleBehind);
+    const behindHash = this.computeFlatHash(visibleBehind, behindRect);
     if (behindHash !== this._behindHash) {
       this.log.trace('Re-flattening behind composite');
-      const behindResult = this.flattenToCanvas(visibleBehind);
+      const behindResult = behindRect
+        ? this.flattenToCanvas(visibleBehind, behindRect, this._behindBuffer ?? undefined)
+        : null;
+      if (behindResult) {
+        this._behindBuffer = behindResult.canvas;
+      }
       this.updateFlatImage(this.konva.behindLayer, 'behindImage', behindResult);
       this._behindHash = behindHash;
     }
 
     // Flatten the ahead composite
     const visibleAhead = this.getVisibleAdaptersForFlattening(ahead);
-    const aheadHash = this.computeFlatHash(visibleAhead);
+    const aheadRect = this.computeFlatRect(visibleAhead);
+    const aheadHash = this.computeFlatHash(visibleAhead, aheadRect);
     if (aheadHash !== this._aheadHash) {
       this.log.trace('Re-flattening ahead composite');
-      const aheadResult = this.flattenToCanvas(visibleAhead);
+      const aheadResult = aheadRect
+        ? this.flattenToCanvas(visibleAhead, aheadRect, this._aheadBuffer ?? undefined)
+        : null;
+      if (aheadResult) {
+        this._aheadBuffer = aheadResult.canvas;
+      }
       this.updateFlatImage(this.konva.aheadLayer, 'aheadImage', aheadResult);
       this._aheadHash = aheadHash;
     }
@@ -481,6 +460,8 @@ export class CanvasLayerFlatteningModule extends CanvasModuleBase {
     this.konva.aheadImage?.destroy();
     this.konva.behindLayer.destroy();
     this.konva.aheadLayer.destroy();
+    this._behindBuffer = null;
+    this._aheadBuffer = null;
   };
 
   repr = () => {

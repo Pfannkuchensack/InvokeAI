@@ -611,6 +611,39 @@ export class CanvasEntityObjectRenderer extends CanvasModuleBase {
     return canvas;
   };
 
+  /**
+   * Returns a canvas reproducing the on-stage *display* form of the entity — including the `source-in`
+   * compositing rect that turns opaque mask shapes into a semi-transparent overlay at `opacity`. Only meaningful
+   * for entities that own a compositing group (inpaint mask, regional guidance). The compositing rect is sized
+   * to cover the requested `rect` so shapes anywhere inside the union of flattened adapters (even off the
+   * visible stage) are tinted correctly.
+   */
+  getDisplayCanvas = (arg: { rect: Rect; opacity: number }): HTMLCanvasElement => {
+    const { rect, opacity } = arg;
+    const compositing = this.konva.compositing;
+    if (!compositing) {
+      return this.getCanvas({ rect, attrs: { opacity, filters: [] } });
+    }
+
+    const objectClone = this.cloneObjectGroup({ attrs: { opacity: 1, filters: [] } });
+
+    const rectClone = compositing.rect.clone();
+    rectClone.setAttrs({ x: rect.x, y: rect.y, width: rect.width, height: rect.height });
+
+    // Mirror the on-stage tree: opaque object group as destination, compositing group at state opacity
+    // owns the source-in rect. The extra group is what carries the opacity (matches updateOpacity).
+    const compositingGroupClone = new Konva.Group({ opacity, listening: false });
+    compositingGroupClone.add(rectClone);
+
+    const wrapper = new Konva.Group({ listening: false });
+    wrapper.add(objectClone);
+    wrapper.add(compositingGroupClone);
+
+    const canvas = konvaNodeToCanvas({ node: wrapper, rect });
+    wrapper.destroy();
+    return canvas;
+  };
+
   getBlob = async (
     arg: {
       rect?: Rect;
