@@ -39,7 +39,8 @@ import type { TabName } from 'features/ui/store/uiTypes';
 import i18n from 'i18next';
 import { atom, computed } from 'nanostores';
 import { useEffect } from 'react';
-import type { MainModelConfig } from 'services/api/types';
+import type { MainOrExternalModelConfig } from 'services/api/types';
+import { isExternalApiModelConfig } from 'services/api/types';
 import { $isConnected } from 'services/events/stores';
 
 /**
@@ -221,7 +222,7 @@ const disconnectedReason = (t: typeof i18n.t) => ({ content: t('parameters.invok
 
 const getReasonsWhyCannotEnqueueGenerateTab = (arg: {
   isConnected: boolean;
-  model: MainModelConfig | null | undefined;
+  model: MainOrExternalModelConfig | null | undefined;
   params: ParamsState;
   refImages: RefImagesState;
   loras: LoRA[];
@@ -243,7 +244,11 @@ const getReasonsWhyCannotEnqueueGenerateTab = (arg: {
     reasons.push({ content: i18n.t('parameters.invoke.noModelSelected') });
   }
 
-  if (model?.base === 'flux') {
+  if (!model) {
+    // nothing else to validate
+  } else if (isExternalApiModelConfig(model)) {
+    // external models don't require local sub-models
+  } else if (model.base === 'flux') {
     if (!params.t5EncoderModel) {
       reasons.push({ content: i18n.t('parameters.invoke.noT5EncoderModelSelected') });
     }
@@ -256,6 +261,12 @@ const getReasonsWhyCannotEnqueueGenerateTab = (arg: {
   }
 
   // FLUX.2 (Klein) extracts Qwen3 encoder and VAE from main model - no separate selections needed
+
+  if (model?.base === 'qwen-image' && model.format === 'gguf_quantized') {
+    if (!params.qwenImageComponentSource) {
+      reasons.push({ content: i18n.t('parameters.invoke.noQwenImageComponentSourceSelected') });
+    }
+  }
 
   if (model?.base === 'z-image') {
     // Check if VAE source is available (either separate VAE or Qwen3 Source)
@@ -270,6 +281,18 @@ const getReasonsWhyCannotEnqueueGenerateTab = (arg: {
     }
   }
 
+  if (model?.base === 'anima') {
+    if (!params.animaVaeModel) {
+      reasons.push({ content: i18n.t('parameters.invoke.noAnimaVaeModelSelected') });
+    }
+    if (!params.animaQwen3EncoderModel) {
+      reasons.push({ content: i18n.t('parameters.invoke.noAnimaQwen3EncoderModelSelected') });
+    }
+    if (!params.animaT5EncoderModel) {
+      reasons.push({ content: i18n.t('parameters.invoke.noAnimaT5EncoderModelSelected') });
+    }
+  }
+
   if (model) {
     for (const lora of loras.filter(({ isEnabled }) => isEnabled === true)) {
       if (model.base !== lora.model.base) {
@@ -280,7 +303,7 @@ const getReasonsWhyCannotEnqueueGenerateTab = (arg: {
     }
   }
 
-  if (model && SUPPORTS_REF_IMAGES_BASE_MODELS.includes(model.base)) {
+  if (model && !isExternalApiModelConfig(model) && SUPPORTS_REF_IMAGES_BASE_MODELS.includes(model.base)) {
     const enabledRefImages = refImages.entities.filter(({ isEnabled }) => isEnabled);
 
     enabledRefImages.forEach((entity, i) => {
@@ -431,7 +454,7 @@ const getReasonsWhyCannotEnqueueUpscaleTab = (arg: {
 
 const getReasonsWhyCannotEnqueueCanvasTab = (arg: {
   isConnected: boolean;
-  model: MainModelConfig | null | undefined;
+  model: MainOrExternalModelConfig | null | undefined;
   canvas: CanvasState;
   params: ParamsState;
   refImages: RefImagesState;
@@ -488,7 +511,11 @@ const getReasonsWhyCannotEnqueueCanvasTab = (arg: {
     reasons.push({ content: i18n.t('parameters.invoke.noModelSelected') });
   }
 
-  if (model?.base === 'flux') {
+  if (!model) {
+    // nothing else to validate
+  } else if (isExternalApiModelConfig(model)) {
+    // external models don't require local sub-models
+  } else if (model.base === 'flux') {
     if (!params.t5EncoderModel) {
       reasons.push({ content: i18n.t('parameters.invoke.noT5EncoderModelSelected') });
     }
@@ -635,6 +662,57 @@ const getReasonsWhyCannotEnqueueCanvasTab = (arg: {
     }
   }
 
+  if (model?.base === 'qwen-image') {
+    const { bbox } = canvas;
+    const gridSize = getGridSize('qwen-image');
+
+    if (bbox.scaleMethod === 'none') {
+      if (bbox.rect.width % gridSize !== 0) {
+        reasons.push({
+          content: i18n.t('parameters.invoke.modelIncompatibleBboxWidth', {
+            model: 'Qwen Image Edit',
+            width: bbox.rect.width,
+            multiple: gridSize,
+          }),
+        });
+      }
+      if (bbox.rect.height % gridSize !== 0) {
+        reasons.push({
+          content: i18n.t('parameters.invoke.modelIncompatibleBboxHeight', {
+            model: 'Qwen Image Edit',
+            height: bbox.rect.height,
+            multiple: gridSize,
+          }),
+        });
+      }
+    } else {
+      if (bbox.scaledSize.width % gridSize !== 0) {
+        reasons.push({
+          content: i18n.t('parameters.invoke.modelIncompatibleScaledBboxWidth', {
+            model: 'Qwen Image Edit',
+            width: bbox.scaledSize.width,
+            multiple: gridSize,
+          }),
+        });
+      }
+      if (bbox.scaledSize.height % gridSize !== 0) {
+        reasons.push({
+          content: i18n.t('parameters.invoke.modelIncompatibleScaledBboxHeight', {
+            model: 'Qwen Image Edit',
+            height: bbox.scaledSize.height,
+            multiple: gridSize,
+          }),
+        });
+      }
+    }
+  }
+
+  if (model?.base === 'qwen-image' && model.format === 'gguf_quantized') {
+    if (!params.qwenImageComponentSource) {
+      reasons.push({ content: i18n.t('parameters.invoke.noQwenImageComponentSourceSelected') });
+    }
+  }
+
   if (model?.base === 'z-image') {
     // Check if VAE source is available (either separate VAE or Qwen3 Source)
     const hasVaeSource = params.zImageVaeModel !== null || params.zImageQwen3SourceModel !== null;
@@ -645,6 +723,18 @@ const getReasonsWhyCannotEnqueueCanvasTab = (arg: {
     const hasQwen3Source = params.zImageQwen3EncoderModel !== null || params.zImageQwen3SourceModel !== null;
     if (!hasQwen3Source) {
       reasons.push({ content: i18n.t('parameters.invoke.noZImageQwen3EncoderSourceSelected') });
+    }
+  }
+
+  if (model?.base === 'anima') {
+    if (!params.animaVaeModel) {
+      reasons.push({ content: i18n.t('parameters.invoke.noAnimaVaeModelSelected') });
+    }
+    if (!params.animaQwen3EncoderModel) {
+      reasons.push({ content: i18n.t('parameters.invoke.noAnimaQwen3EncoderModelSelected') });
+    }
+    if (!params.animaT5EncoderModel) {
+      reasons.push({ content: i18n.t('parameters.invoke.noAnimaT5EncoderModelSelected') });
     }
   }
 
@@ -682,7 +772,7 @@ const getReasonsWhyCannotEnqueueCanvasTab = (arg: {
     }
   });
 
-  if (model && SUPPORTS_REF_IMAGES_BASE_MODELS.includes(model.base)) {
+  if (model && !isExternalApiModelConfig(model) && SUPPORTS_REF_IMAGES_BASE_MODELS.includes(model.base)) {
     const enabledRefImages = refImages.entities.filter(({ isEnabled }) => isEnabled);
 
     enabledRefImages.forEach((entity, i) => {
