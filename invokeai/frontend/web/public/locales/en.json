@@ -3331,6 +3331,33 @@
         "selectPreset": "Select Style Preset",
         "noMatchingPresets": "No matching presets"
     },
+    "wildcards": {
+        "wildcards": "Wildcards",
+        "addWildcard": "Add Wildcard",
+        "editWildcard": "Edit Wildcard",
+        "deleteWildcard": "Delete Wildcard",
+        "deleteWildcard2": "Are you sure you want to delete this wildcard? This cannot be undone.",
+        "importWildcards": "Import Wildcards",
+        "importDesc": "Import one or more wildcard files (.txt or .json):",
+        "importTxtDesc": "A .txt file becomes one wildcard (name = filename, values = lines).",
+        "importJsonDesc": "A .json file may contain multiple wildcards.",
+        "name": "Name",
+        "values": "Values",
+        "oneValuePerLine": "One value per line",
+        "valueCount_one": "{{count}} value",
+        "valueCount_other": "{{count}} values",
+        "makePublic": "Make public",
+        "shared": "Shared",
+        "myWildcards": "My Wildcards",
+        "sharedWildcards": "Shared Wildcards",
+        "noWildcards": "No wildcards",
+        "noMatchingWildcards": "No matching wildcards",
+        "searchByName": "Search by name",
+        "viewList": "View Wildcard List",
+        "wildcardDeleted": "Wildcard deleted",
+        "unableToDeleteWildcard": "Unable to delete wildcard",
+        "unableToSaveWildcard": "Unable to save wildcard"
+    },
     "ui": {
         "tabs": {
             "generate": "Generate",

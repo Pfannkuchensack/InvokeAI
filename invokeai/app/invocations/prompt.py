@@ -9,7 +9,8 @@ from invokeai.app.invocations.baseinvocation import BaseInvocation, invocation
 from invokeai.app.invocations.fields import InputField, UIComponent
 from invokeai.app.invocations.primitives import StringCollectionOutput
 from invokeai.app.services.shared.invocation_context import InvocationContext
-from invokeai.app.util.dynamicprompts import find_missing_wildcards, get_wildcard_manager
+from invokeai.app.services.wildcard_records.wildcard_records_common import wildcards_to_root_map_dict
+from invokeai.app.util.dynamicprompts import build_wildcard_manager, find_missing_wildcards
 
 
 @invocation(
@@ -31,7 +32,15 @@ class DynamicPromptInvocation(BaseInvocation):
     combinatorial: bool = InputField(default=False, description="Whether to use the combinatorial generator")
 
     def invoke(self, context: InvocationContext) -> StringCollectionOutput:
-        wildcard_manager = get_wildcard_manager(context.config.get().wildcards_path)
+        # Resolve wildcards from the invoking user's accessible DB wildcards (own + public), merged
+        # with any global on-disk wildcards. `_data`/`_services` are internal but the only way for a
+        # node to reach the queue item's user_id and the wildcard records service.
+        user_id = context._data.queue_item.user_id
+        records = context._services.wildcard_records.get_many(user_id=user_id, is_admin=False)
+        wildcard_manager = build_wildcard_manager(
+            db_wildcards=wildcards_to_root_map_dict(records, owner_user_id=user_id),
+            disk_path=context.config.get().wildcards_path,
+        )
 
         # An unknown wildcard sends the combinatorial generator into an infinite loop, so fail fast
         # with a clear message instead of hanging the invocation.

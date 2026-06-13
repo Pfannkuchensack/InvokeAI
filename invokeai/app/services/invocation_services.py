@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from invokeai.app.services.session_queue.session_queue_base import SessionQueueBase
     from invokeai.app.services.urls.urls_base import UrlServiceBase
     from invokeai.app.services.users.users_base import UserServiceBase
+    from invokeai.app.services.wildcard_records.wildcard_records_base import WildcardRecordsStorageBase
     from invokeai.app.services.workflow_records.workflow_records_base import WorkflowRecordsStorageBase
     from invokeai.app.services.workflow_thumbnails.workflow_thumbnails_base import WorkflowThumbnailServiceBase
     from invokeai.backend.stable_diffusion.diffusion.conditioning_data import ConditioningFieldData
@@ -79,6 +80,7 @@ class InvocationServices:
         workflow_thumbnails: "WorkflowThumbnailServiceBase",
         client_state_persistence: "ClientStatePersistenceABC",
         users: "UserServiceBase",
+        wildcard_records: "WildcardRecordsStorageBase",
     ):
         self.board_images = board_images
         self.board_image_records = board_image_records
@@ -111,3 +113,4 @@ class InvocationServices:
         self.workflow_thumbnails = workflow_thumbnails
         self.client_state_persistence = client_state_persistence
         self.users = users
+        self.wildcard_records = wildcard_records

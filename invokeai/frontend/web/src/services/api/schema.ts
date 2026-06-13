@@ -2434,6 +2434,56 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workflows/validate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Validate Workflow
+         * @description Statically checks whether a workflow is runnable in this Invoke instance.
+         *
+         *     Verifies that every invocation type referenced by the workflow is registered, and (where
+         *     possible) that the node's declared inputs/outputs and the edge endpoints still exist on the
+         *     current schema. Does not look up models, build a graph, or submit anything to the queue.
+         */
+        post: operations["validate_workflow"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/workflows/upgrade": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Upgrade Workflow
+         * @description Reconciles a workflow against the current invocation registry.
+         *
+         *     For every node whose invocation type is registered and shares the template's semver major, the
+         *     node's inputs/outputs are pruned to the current schema and its version string is bumped. Nodes
+         *     with unknown invocation types are left in place and reported in `unfixable`. Edges that point
+         *     at missing nodes or unknown handles are removed and reported in `applied`. No type renaming is
+         *     performed.
+         */
+        post: operations["upgrade_workflow"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/style_presets/i/{style_preset_id}": {
         parameters: {
             query?: never;
@@ -2534,6 +2584,82 @@ export type paths = {
         put?: never;
         /** Import Style Presets */
         post: operations["import_style_presets"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/wildcards/": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Wildcards
+         * @description Gets the wildcards visible to the current user (own + public).
+         */
+        get: operations["list_wildcards"];
+        put?: never;
+        /**
+         * Create Wildcard
+         * @description Creates a wildcard owned by the current user.
+         */
+        post: operations["create_wildcard"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/wildcards/i/{wildcard_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Wildcard
+         * @description Gets a wildcard.
+         */
+        get: operations["get_wildcard"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Wildcard
+         * @description Deletes a wildcard.
+         */
+        delete: operations["delete_wildcard"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Wildcard
+         * @description Updates a wildcard.
+         */
+        patch: operations["update_wildcard"];
+        trace?: never;
+    };
+    "/api/v1/wildcards/import": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Import Wildcards
+         * @description Imports wildcards from one or more files, owned by the current user.
+         *
+         *     A `.txt` file becomes a single wildcard (name = filename, values = lines). A `.json` file may be
+         *     an object `{name: [values]}` or a list of `{name, values}` objects. Importing overwrites any of
+         *     the user's existing same-named wildcards.
+         */
+        post: operations["import_wildcards"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4242,6 +4368,14 @@ export type components = {
              */
             file: Blob;
         };
+        /** Body_import_wildcards */
+        Body_import_wildcards: {
+            /**
+             * Files
+             * @description The wildcard files to import (.txt or .json)
+             */
+            files: Blob[];
+        };
         /** Body_parse_dynamicprompts */
         Body_parse_dynamicprompts: {
             /**
@@ -4342,6 +4476,11 @@ export type components = {
              */
             is_public: boolean;
         };
+        /** Body_upgrade_workflow */
+        Body_upgrade_workflow: {
+            /** @description The workflow to upgrade */
+            workflow: components["schemas"]["WorkflowWithoutID"];
+        };
         /** Body_upload_image */
         Body_upload_image: {
             /**
@@ -4359,6 +4498,11 @@ export type components = {
              * @description The metadata to associate with the image, must be a stringified JSON dict
              */
             metadata?: string | null;
+        };
+        /** Body_validate_workflow */
+        Body_validate_workflow: {
+            /** @description The workflow to validate */
+            workflow: components["schemas"]["WorkflowWithoutID"];
         };
         /**
          * Boolean Collection Primitive
@@ -16166,6 +16310,7 @@ export type components = {
          *         custom_nodes_dir: Path to directory for custom nodes.
          *         style_presets_dir: Path to directory for style presets.
          *         workflow_thumbnails_dir: Path to directory for workflow thumbnails.
+         *         wildcards_dir: Path to directory for dynamic prompt wildcard files.
          *         log_handlers: Log handler. Valid options are "console", "file=<path>", "syslog=path|address:host:port", "http=<url>".
          *         log_format: Log format. Use "plain" for text-only, "color" for colorized output, "legacy" for 2.3-style logging and "syslog" for syslog-style.<br>Valid values: `plain`, `color`, `syslog`, `legacy`
          *         log_level: Emit logging messages at this level or higher.<br>Valid values: `debug`, `info`, `warning`, `error`, `critical`
@@ -16360,6 +16505,13 @@ export type components = {
              * @default workflow_thumbnails
              */
             workflow_thumbnails_dir?: string;
+            /**
+             * Wildcards Dir
+             * Format: path
+             * @description Path to directory for dynamic prompt wildcard files.
+             * @default wildcards
+             */
+            wildcards_dir?: string;
             /**
              * Log Handlers
              * @description Log handler. Valid options are "console", "file=<path>", "syslog=path|address:host:port", "http=<url>".
@@ -31813,6 +31965,72 @@ export type components = {
              */
             cover_image_name?: string | null;
         };
+        /** WildcardChanges */
+        WildcardChanges: {
+            /**
+             * Name
+             * @description The wildcard's new name.
+             */
+            name?: string | null;
+            /**
+             * Values
+             * @description The updated list of values.
+             */
+            values?: string[] | null;
+            /**
+             * Is Public
+             * @description Whether the wildcard is visible to other users.
+             */
+            is_public?: boolean | null;
+        };
+        /** WildcardRecordDTO */
+        WildcardRecordDTO: {
+            /**
+             * Name
+             * @description The name of the wildcard, referenced in prompts as `__name__`.
+             */
+            name: string;
+            /**
+             * Values
+             * @description The list of values the wildcard expands to.
+             */
+            values: string[];
+            /**
+             * Is Public
+             * @description Whether the wildcard is visible to other users.
+             * @default false
+             */
+            is_public?: boolean;
+            /**
+             * Id
+             * @description The wildcard ID.
+             */
+            id: string;
+            /**
+             * User Id
+             * @description The user who owns this wildcard.
+             */
+            user_id: string;
+        };
+        /** WildcardWithoutId */
+        WildcardWithoutId: {
+            /**
+             * Name
+             * @description The name of the wildcard, referenced in prompts as `__name__`.
+             */
+            name: string;
+            /**
+             * Values
+             * @description The list of values the wildcard expands to.
+             */
+            values: string[];
+            /**
+             * Is Public
+             * @description Whether the wildcard is visible to other users.
+             * @default false
+             */
+            is_public?: boolean;
+        };
         /** Workflow */
         Workflow: {
             /**
@@ -32057,6 +32275,182 @@ export type components = {
              * @description The URL of the workflow thumbnail.
              */
             thumbnail_url?: string | null;
+        };
+        /** WorkflowUpgradeEdgeRemoved */
+        WorkflowUpgradeEdgeRemoved: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "edge_removed";
+            /** Source */
+            source: string;
+            /** Source Field */
+            source_field: string;
+            /** Target */
+            target: string;
+            /** Target Field */
+            target_field: string;
+            /**
+             * Reason
+             * @enum {string}
+             */
+            reason: "source_node_missing" | "target_node_missing" | "source_field_missing" | "target_field_missing";
+        };
+        /** WorkflowUpgradeFieldDropped */
+        WorkflowUpgradeFieldDropped: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "field_dropped";
+            /** Node Id */
+            node_id: string;
+            /** Field */
+            field: string;
+            /**
+             * Direction
+             * @enum {string}
+             */
+            direction: "input" | "output";
+        };
+        /** WorkflowUpgradeNodeUpdated */
+        WorkflowUpgradeNodeUpdated: {
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            type: "node_updated";
+            /** Node Id */
+            node_id: string;
+            /** From Version */
+            from_version: string;
+            /** To Version */
+            to_version: string;
+        };
+        /** WorkflowUpgradeResult */
+        WorkflowUpgradeResult: {
+            /** @description The upgraded workflow. */
+            workflow: components["schemas"]["WorkflowWithoutID"];
+            /**
+             * Applied
+             * @description Actions applied to the workflow during upgrade.
+             */
+            applied: (components["schemas"]["WorkflowUpgradeNodeUpdated"] | components["schemas"]["WorkflowUpgradeFieldDropped"] | components["schemas"]["WorkflowUpgradeEdgeRemoved"])[];
+            /**
+             * Unfixable
+             * @description Issues that the upgrade can't fix automatically (left in the workflow as-is).
+             */
+            unfixable: components["schemas"]["WorkflowUpgradeUnknownInvocation"][];
+        };
+        /** WorkflowUpgradeUnknownInvocation */
+        WorkflowUpgradeUnknownInvocation: {
+            /**
+             * Type
+             * @default unknown_invocation
+             * @constant
+             */
+            type?: "unknown_invocation";
+            /** Node Type */
+            node_type: string;
+            /** Node Ids */
+            node_ids: string[];
+        };
+        /** WorkflowValidationEdgeError */
+        WorkflowValidationEdgeError: {
+            /**
+             * Source Node
+             * @description The id of the source node of the edge.
+             */
+            source_node: string;
+            /**
+             * Source Field
+             * @description The name of the source field of the edge.
+             */
+            source_field: string;
+            /**
+             * Target Node
+             * @description The id of the target node of the edge.
+             */
+            target_node: string;
+            /**
+             * Target Field
+             * @description The name of the target field of the edge.
+             */
+            target_field: string;
+            /**
+             * Reason
+             * @description Why this edge is broken.
+             * @enum {string}
+             */
+            reason: "source_node_missing" | "target_node_missing" | "source_field_missing" | "target_field_missing";
+        };
+        /** WorkflowValidationMissingField */
+        WorkflowValidationMissingField: {
+            /**
+             * Node Id
+             * @description The id of the node with the unknown field.
+             */
+            node_id: string;
+            /**
+             * Node Type
+             * @description The invocation type of the node.
+             */
+            node_type: string;
+            /**
+             * Field
+             * @description The name of the field that does not exist on the registered invocation.
+             */
+            field: string;
+            /**
+             * Direction
+             * @description Whether the unknown field was on the inputs or outputs.
+             * @enum {string}
+             */
+            direction: "input" | "output";
+        };
+        /** WorkflowValidationResult */
+        WorkflowValidationResult: {
+            /**
+             * Valid
+             * @description True iff there are no missing invocations, fields, or broken edges.
+             */
+            valid: boolean;
+            /**
+             * Missing Invocations
+             * @description Invocation types referenced by the workflow but not registered.
+             */
+            missing_invocations: string[];
+            /**
+             * Missing Node Fields
+             * @description Fields referenced on nodes that no longer exist on the registered invocation.
+             */
+            missing_node_fields: components["schemas"]["WorkflowValidationMissingField"][];
+            /**
+             * Edge Errors
+             * @description Edges that point at missing nodes or fields.
+             */
+            edge_errors: components["schemas"]["WorkflowValidationEdgeError"][];
+            /** @description Counts collected during validation. */
+            stats: components["schemas"]["WorkflowValidationStats"];
+        };
+        /** WorkflowValidationStats */
+        WorkflowValidationStats: {
+            /**
+             * Nodes Total
+             * @description Total number of nodes in the workflow.
+             */
+            nodes_total: number;
+            /**
+             * Nodes Checked
+             * @description Number of nodes that were checked against the invocation registry.
+             */
+            nodes_checked: number;
+            /**
+             * Ui Only Skipped
+             * @description Number of UI-only nodes (notes, current_image, connector) skipped.
+             */
+            ui_only_skipped: number;
         };
         /** WorkflowWithoutID */
         WorkflowWithoutID: {
@@ -37818,6 +38212,72 @@ export interface operations {
             };
         };
     };
+    validate_workflow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Body_validate_workflow"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowValidationResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    upgrade_workflow: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["Body_upgrade_workflow"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkflowUpgradeResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_style_preset: {
         parameters: {
             query?: never;
@@ -38058,6 +38518,192 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_wildcards: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WildcardRecordDTO"][];
+                };
+            };
+        };
+    };
+    create_wildcard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WildcardWithoutId"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WildcardRecordDTO"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_wildcard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The wildcard to get */
+                wildcard_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WildcardRecordDTO"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_wildcard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The wildcard to delete */
+                wildcard_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_wildcard: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description The id of the wildcard to update */
+                wildcard_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WildcardChanges"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WildcardRecordDTO"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    import_wildcards: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "multipart/form-data": components["schemas"]["Body_import_wildcards"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WildcardRecordDTO"][];
                 };
             };
             /** @description Validation Error */

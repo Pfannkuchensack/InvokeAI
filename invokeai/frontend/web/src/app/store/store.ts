@@ -41,6 +41,7 @@ import { stylePresetSliceConfig } from 'features/stylePresets/store/stylePresetS
 import { hotkeysSliceConfig } from 'features/system/store/hotkeysSlice';
 import { systemSliceConfig } from 'features/system/store/systemSlice';
 import { uiSliceConfig } from 'features/ui/store/uiSlice';
+import { wildcardSliceConfig } from 'features/wildcards/store/wildcardSlice';
 import { diff } from 'jsondiffpatch';
 import type { SerializeFunction, UnserializeFunction } from 'redux-remember';
 import { REMEMBER_REHYDRATED, rememberEnhancer, rememberReducer } from 'redux-remember';
@@ -83,6 +84,7 @@ const SLICE_CONFIGS = {
   [systemSliceConfig.slice.reducerPath]: systemSliceConfig,
   [uiSliceConfig.slice.reducerPath]: uiSliceConfig,
   [upscaleSliceConfig.slice.reducerPath]: upscaleSliceConfig,
+  [wildcardSliceConfig.slice.reducerPath]: wildcardSliceConfig,
   [workflowLibrarySliceConfig.slice.reducerPath]: workflowLibrarySliceConfig,
   [workflowSettingsSliceConfig.slice.reducerPath]: workflowSettingsSliceConfig,
 };
@@ -119,6 +121,7 @@ const ALL_REDUCERS = {
   [systemSliceConfig.slice.reducerPath]: systemSliceConfig.slice.reducer,
   [uiSliceConfig.slice.reducerPath]: uiSliceConfig.slice.reducer,
   [upscaleSliceConfig.slice.reducerPath]: upscaleSliceConfig.slice.reducer,
+  [wildcardSliceConfig.slice.reducerPath]: wildcardSliceConfig.slice.reducer,
   [workflowLibrarySliceConfig.slice.reducerPath]: workflowLibrarySliceConfig.slice.reducer,
   [workflowSettingsSliceConfig.slice.reducerPath]: workflowSettingsSliceConfig.slice.reducer,
 };

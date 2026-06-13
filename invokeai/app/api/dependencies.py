@@ -49,6 +49,7 @@ from invokeai.app.services.session_queue.session_queue_sqlite import SqliteSessi
 from invokeai.app.services.shared.sqlite.sqlite_util import init_db
 from invokeai.app.services.style_preset_images.style_preset_images_disk import StylePresetImageFileStorageDisk
 from invokeai.app.services.style_preset_records.style_preset_records_sqlite import SqliteStylePresetRecordsStorage
+from invokeai.app.services.wildcard_records.wildcard_records_sqlite import SqliteWildcardRecordsStorage
 from invokeai.app.services.urls.urls_default import LocalUrlService
 from invokeai.app.services.users.users_default import UserService
 from invokeai.app.services.workflow_records.workflow_records_sqlite import SqliteWorkflowRecordsStorage
@@ -188,6 +189,7 @@ class ApiDependencies:
         workflow_thumbnails = WorkflowThumbnailFileStorageDisk(workflow_thumbnails_folder)
         client_state_persistence = ClientStatePersistenceSqlite(db=db)
         users = UserService(db=db)
+        wildcard_records = SqliteWildcardRecordsStorage(db=db)
 
         services = InvocationServices(
             board_image_records=board_image_records,
@@ -221,6 +223,7 @@ class ApiDependencies:
             workflow_thumbnails=workflow_thumbnails,
             client_state_persistence=client_state_persistence,
             users=users,
+            wildcard_records=wildcard_records,
         )
 
         ApiDependencies.invoker = Invoker(services)

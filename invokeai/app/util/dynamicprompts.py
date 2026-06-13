@@ -15,14 +15,29 @@ from dynamicprompts.wildcards import WildcardManager
 from pyparsing import ParseException
 
 
-def get_wildcard_manager(wildcards_path: Path) -> WildcardManager:
-    """Build a `WildcardManager` rooted at the given directory, creating the directory if needed.
+def build_wildcard_manager(
+    db_wildcards: dict[str, list[str]] | None = None,
+    disk_path: Path | None = None,
+) -> WildcardManager:
+    """Build a `WildcardManager` from in-memory (DB-backed) wildcards and/or an on-disk directory.
 
-    Wildcard collections are plain `.txt` files (one value per line) placed under this directory and
-    referenced in prompts as `__name__` (subdirectories map to `__subdir/name__`).
+    Wildcards are referenced in prompts as `__name__`. Two sources can be merged:
+    - `db_wildcards`: a `{name: values}` mapping, typically the current user's accessible wildcards
+      (own + public) loaded from the database. This is the primary, multi-user source.
+    - `disk_path`: an optional directory of `.txt`/structured wildcard files, treated as global
+      wildcards shared by all users. The directory is created if it does not exist.
+
+    On a name collision, DB wildcards take precedence over disk wildcards.
     """
-    wildcards_path.mkdir(parents=True, exist_ok=True)
-    return WildcardManager(wildcards_path)
+    roots: list[Path | dict[str, list[str]]] = []
+    if disk_path is not None:
+        disk_path.mkdir(parents=True, exist_ok=True)
+        roots.append(disk_path)
+    if db_wildcards:
+        roots.append(db_wildcards)
+    if not roots:
+        return WildcardManager()
+    return WildcardManager(root_map={"": roots})
 
 
 def _iter_wildcard_names(command: Command) -> Iterator[str]:
