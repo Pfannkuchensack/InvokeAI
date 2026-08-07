@@ -2090,6 +2090,64 @@ ideogram_4_fp8 = StarterModel(
     "memory use). Non-commercial license — accept it on HuggingFace first. ~26GB",
     type=ModelType.Main,
 )
+
+# GGUF transformers. Ideogram 4 runs dual-branch CFG with two separately trained weight sets, so each
+# quantization is two files that are installed as two model records and paired in the model loader —
+# the same shape Wan 2.2 A14B uses for its dual-expert MoE.
+#
+# These cover only the transformers. The VAE ships as a dependency (Ideogram 4's VAE is bit-identical
+# to the FLUX.2 one), but the Qwen3-VL encoder still has to be supplied — either as a standalone
+# encoder or as a submodel of an installed Diffusers Ideogram 4 model. The win is runtime memory — the
+# resident transformer pair drops from ~17.3GiB (fp8) to ~10.5GiB (q4_0) or ~13.7GiB (q5_1) — plus a
+# quality ladder that, unlike nf4, does not require CUDA/bitsandbytes.
+#
+# q8_0 is deliberately not offered: at ~18.9GiB per pair it is larger than the fp8 build it would
+# replace, with no quality gain.
+ideogram_4_gguf_unconditional_q4_0 = StarterModel(
+    name="Ideogram 4 Unconditional Transformer (Q4_0)",
+    base=BaseModelType.Ideogram4,
+    source="https://huggingface.co/molbal/ideogram-4-gguf/resolve/main/ideogram4-unconditional_transformer-q4_0.gguf",
+    description="Ideogram 4 unconditional (negative) transformer, GGUF Q4_0. The partner of the "
+    "conditional Q4_0 transformer; selected via the Advanced 'Unconditional Transformer' field. ~5.6GB",
+    type=ModelType.Main,
+    format=ModelFormat.GGUFQuantized,
+)
+
+ideogram_4_gguf_q4_0 = StarterModel(
+    name="Ideogram 4 (GGUF Q4_0)",
+    base=BaseModelType.Ideogram4,
+    source="https://huggingface.co/molbal/ideogram-4-gguf/resolve/main/ideogram4-transformer-q4_0.gguf",
+    description="Ideogram 4 conditional transformer, GGUF Q4_0 — the smallest option. Pick this as the "
+    "main model; the unconditional partner and the VAE come with it. Still needs a Qwen3-VL text "
+    "encoder: either a standalone one, or an installed Diffusers Ideogram 4 model to take it from. "
+    "~11.3GB for both transformers",
+    type=ModelType.Main,
+    format=ModelFormat.GGUFQuantized,
+    dependencies=[ideogram_4_gguf_unconditional_q4_0, flux2_vae],
+)
+
+ideogram_4_gguf_unconditional_q5_1 = StarterModel(
+    name="Ideogram 4 Unconditional Transformer (Q5_1)",
+    base=BaseModelType.Ideogram4,
+    source="https://huggingface.co/molbal/ideogram-4-gguf/resolve/main/ideogram4-unconditional_transformer-q5_1.gguf",
+    description="Ideogram 4 unconditional (negative) transformer, GGUF Q5_1. The partner of the "
+    "conditional Q5_1 transformer; selected via the Advanced 'Unconditional Transformer' field. ~7.3GB",
+    type=ModelType.Main,
+    format=ModelFormat.GGUFQuantized,
+)
+
+ideogram_4_gguf_q5_1 = StarterModel(
+    name="Ideogram 4 (GGUF Q5_1)",
+    base=BaseModelType.Ideogram4,
+    source="https://huggingface.co/molbal/ideogram-4-gguf/resolve/main/ideogram4-transformer-q5_1.gguf",
+    description="Ideogram 4 conditional transformer, GGUF Q5_1 — the highest quantization that still "
+    "stays well under the fp8 build. Pick this as the main model; the unconditional partner and the VAE "
+    "come with it. Still needs a Qwen3-VL text encoder: either a standalone one, or an installed "
+    "Diffusers Ideogram 4 model to take it from. ~14.7GB for both transformers",
+    type=ModelType.Main,
+    format=ModelFormat.GGUFQuantized,
+    dependencies=[ideogram_4_gguf_unconditional_q5_1, flux2_vae],
+)
 # endregion
 
 # List of starter models, displayed on the frontend.
@@ -2104,6 +2162,10 @@ STARTER_MODELS: list[StarterModel] = [
     sd35_large,
     ideogram_4_nf4,
     ideogram_4_fp8,
+    ideogram_4_gguf_q4_0,
+    ideogram_4_gguf_unconditional_q4_0,
+    ideogram_4_gguf_q5_1,
+    ideogram_4_gguf_unconditional_q5_1,
     cyberrealistic_sd1,
     rev_animated_sd1,
     dreamshaper_8_sd1,
