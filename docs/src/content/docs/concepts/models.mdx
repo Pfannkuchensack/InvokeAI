@@ -64,6 +64,19 @@ The weights are gated on HuggingFace under a **non-commercial license**. Open th
 
 Paste either repo ID into the Model Manager's HuggingFace / URL field to install.
 
+### GGUF transformers
+
+Community GGUF builds of the transformer are also available, as starter models under **Ideogram 4 (GGUF Q4_0)** and **Ideogram 4 (GGUF Q5_1)**. They are an *addition* to one of the builds above rather than a replacement — what they buy you is a smaller resident model during generation (about 10.5 GB at Q4_0 against 17.3 GB for fp8), and a quality ladder that, unlike nf4, does not require CUDA.
+
+Ideogram 4 runs two transformers on every step — a conditional and an unconditional branch, with separately trained weights — so **one quantization is two files**. Installing the starter model pulls in both, plus the VAE. Two things to know:
+
+- The **Unconditional Transformer** field under *Advanced* must point at the matching partner file. The dropdown only offers unconditional branches, so it cannot be filled with the wrong kind — but it does not distinguish quantization levels, so pair Q4_0 with Q4_0.
+- The **Qwen3-VL text encoder** is not part of the GGUF download. Either select a standalone encoder, or keep a Diffusers Ideogram 4 model installed and Invoke will take the encoder from it automatically.
+
+:::note[Why not Q8_0?]
+The upstream repository also offers Q8_0. Invoke does not ship it as a starter model: at roughly 18.9 GB for the pair it is *larger* than the fp8 build it would replace, with no quality gain.
+:::
+
 ### Prompting Ideogram 4
 
 When an Ideogram 4 model is selected, Invoke builds the structured JSON prompt automatically:

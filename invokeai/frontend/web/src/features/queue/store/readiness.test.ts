@@ -51,6 +51,29 @@ const flux2GGUF9BModel = {
 const kleinVaeModel = { key: 'vae', name: 'VAE', base: 'flux2', type: 'vae' };
 const kleinQwen3Model = { key: 'qwen3', name: 'Qwen3', base: 'flux2', type: 'qwen3_encoder' };
 
+const ideogram4DiffusersModel = {
+  key: 'ideogram4-diff',
+  hash: 'h',
+  name: 'Ideogram 4',
+  base: 'ideogram-4',
+  type: 'main',
+  format: 'diffusers',
+} as unknown as MainModelConfig;
+
+const ideogram4GGUFModel = {
+  key: 'ideogram4-gguf',
+  hash: 'h',
+  name: 'Ideogram 4 GGUF',
+  base: 'ideogram-4',
+  type: 'main',
+  format: 'gguf_quantized',
+  branch: 'conditional',
+} as unknown as MainModelConfig;
+
+const ideogram4UncondModel = { key: 'ideogram4-uncond', name: 'Uncond', base: 'ideogram-4', type: 'main' };
+const ideogram4VaeModel = { key: 'flux2-vae', name: 'FLUX.2 VAE', base: 'flux2', type: 'vae' };
+const ideogram4EncoderModel = { key: 'qwen3vl', name: 'Qwen3-VL', base: 'any', type: 'qwen3_vl_encoder' };
+
 const baseDynamicPrompts: DynamicPromptsState = {
   _version: 1,
   maxPrompts: 100,
@@ -82,6 +105,9 @@ const buildGenerateTabArg = (overrides: {
   hasFlux2DiffusersVaeSource?: boolean;
   hasFlux2DiffusersQwen3Source?: boolean;
   hasIdeogram4DiffusersSource?: boolean;
+  ideogram4UnconditionalTransformerModel?: unknown;
+  ideogram4VaeModel?: unknown;
+  ideogram4Qwen3EncoderModel?: unknown;
 }) => ({
   isConnected: true,
   model: overrides.model ?? flux2DiffusersModel,
@@ -89,6 +115,9 @@ const buildGenerateTabArg = (overrides: {
     ...baseParams,
     kleinVaeModel: overrides.kleinVaeModel ?? null,
     kleinQwen3EncoderModel: overrides.kleinQwen3EncoderModel ?? null,
+    ideogram4UnconditionalTransformerModel: overrides.ideogram4UnconditionalTransformerModel ?? null,
+    ideogram4VaeModel: overrides.ideogram4VaeModel ?? null,
+    ideogram4Qwen3EncoderModel: overrides.ideogram4Qwen3EncoderModel ?? null,
   } as unknown as ParamsState,
   refImages: baseRefImages,
   loras: [],
@@ -143,7 +172,70 @@ const hasFlux2VaeReason = (reasons: { content: string }[]) =>
 const hasFlux2Qwen3Reason = (reasons: { content: string }[]) =>
   reasons.some((r) => r.content.includes('noFlux2KleinQwen3EncoderModelSelected'));
 
+const hasIdeogram4UncondReason = (reasons: { content: string }[]) =>
+  reasons.some((r) => r.content.includes('noIdeogram4UnconditionalTransformerSelected'));
+
+const hasIdeogram4VaeReason = (reasons: { content: string }[]) =>
+  reasons.some((r) => r.content.includes('noIdeogram4VaeModelSelected'));
+
+const hasIdeogram4EncoderReason = (reasons: { content: string }[]) =>
+  reasons.some((r) => r.content.includes('noIdeogram4Qwen3EncoderModelSelected'));
+
 // --- Tests ---
+
+describe('Ideogram 4 GGUF readiness checks – generate tab', () => {
+  it('no errors for a Diffusers model, which bundles both branches and all components', () => {
+    const reasons = getReasonsWhyCannotEnqueueGenerateTab(buildGenerateTabArg({ model: ideogram4DiffusersModel }));
+    expect(hasIdeogram4UncondReason(reasons)).toBe(false);
+    expect(hasIdeogram4VaeReason(reasons)).toBe(false);
+    expect(hasIdeogram4EncoderReason(reasons)).toBe(false);
+  });
+
+  it('errors on all three when a GGUF model has nothing selected and no diffusers source', () => {
+    const reasons = getReasonsWhyCannotEnqueueGenerateTab(buildGenerateTabArg({ model: ideogram4GGUFModel }));
+    expect(hasIdeogram4UncondReason(reasons)).toBe(true);
+    expect(hasIdeogram4VaeReason(reasons)).toBe(true);
+    expect(hasIdeogram4EncoderReason(reasons)).toBe(true);
+  });
+
+  it('still demands the unconditional branch when a diffusers source covers the components', () => {
+    // The source model supplies the encoder and VAE, but never the second CFG branch — that is a
+    // separate GGUF file, and running without it would silently produce an unguided image.
+    const reasons = getReasonsWhyCannotEnqueueGenerateTab(
+      buildGenerateTabArg({ model: ideogram4GGUFModel, hasIdeogram4DiffusersSource: true })
+    );
+    expect(hasIdeogram4UncondReason(reasons)).toBe(true);
+    expect(hasIdeogram4VaeReason(reasons)).toBe(false);
+    expect(hasIdeogram4EncoderReason(reasons)).toBe(false);
+  });
+
+  it('is satisfied by standalone components without any diffusers model installed', () => {
+    const reasons = getReasonsWhyCannotEnqueueGenerateTab(
+      buildGenerateTabArg({
+        model: ideogram4GGUFModel,
+        ideogram4UnconditionalTransformerModel: ideogram4UncondModel,
+        ideogram4VaeModel: ideogram4VaeModel,
+        ideogram4Qwen3EncoderModel: ideogram4EncoderModel,
+      })
+    );
+    expect(hasIdeogram4UncondReason(reasons)).toBe(false);
+    expect(hasIdeogram4VaeReason(reasons)).toBe(false);
+    expect(hasIdeogram4EncoderReason(reasons)).toBe(false);
+  });
+
+  it('errors only for the encoder when a standalone VAE is set but nothing supplies the encoder', () => {
+    const reasons = getReasonsWhyCannotEnqueueGenerateTab(
+      buildGenerateTabArg({
+        model: ideogram4GGUFModel,
+        ideogram4UnconditionalTransformerModel: ideogram4UncondModel,
+        ideogram4VaeModel: ideogram4VaeModel,
+      })
+    );
+    expect(hasIdeogram4UncondReason(reasons)).toBe(false);
+    expect(hasIdeogram4VaeReason(reasons)).toBe(false);
+    expect(hasIdeogram4EncoderReason(reasons)).toBe(true);
+  });
+});
 
 describe('FLUX.2 Klein readiness checks – generate tab', () => {
   it('no errors when main model is diffusers (VAE/Qwen3 extracted from it)', () => {
