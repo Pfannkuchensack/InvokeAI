@@ -27988,7 +27988,7 @@ export type components = {
              * Variant
              * @description The variant of the model.
              */
-            variant?: components["schemas"]["ModelVariantType"] | components["schemas"]["ClipVariantType"] | components["schemas"]["FluxVariantType"] | components["schemas"]["Flux2VariantType"] | components["schemas"]["ZImageVariantType"] | components["schemas"]["QwenImageVariantType"] | components["schemas"]["WanVariantType"] | components["schemas"]["WanLoRAVariantType"] | components["schemas"]["Qwen3VariantType"] | components["schemas"]["Krea2VariantType"] | components["schemas"]["PiDDecoderVariantType"] | null;
+            variant?: components["schemas"]["ModelVariantType"] | components["schemas"]["ClipVariantType"] | components["schemas"]["FluxVariantType"] | components["schemas"]["Flux2VariantType"] | components["schemas"]["ZImageVariantType"] | components["schemas"]["QwenImageVariantType"] | components["schemas"]["WanVariantType"] | components["schemas"]["WanLoRAVariantType"] | components["schemas"]["Qwen3VariantType"] | components["schemas"]["Qwen3VLVariantType"] | components["schemas"]["Krea2VariantType"] | components["schemas"]["PiDDecoderVariantType"] | null;
             /** @description The prediction type of the model. */
             prediction_type?: components["schemas"]["SchedulerPredictionType"] | null;
             /**
@@ -30207,8 +30207,8 @@ export type components = {
          * @description Configuration for a single-file Qwen3-VL text encoder checkpoint (e.g. ComfyUI ``qwen3vl_4b_*``).
          *
          *     Distinguished from the text-only ``Qwen3Encoder`` checkpoint (Z-Image) by the presence of the
-         *     Qwen3-VL visual tower. The tokenizer is not bundled in single-file checkpoints and is pulled from
-         *     HuggingFace (``Qwen/Qwen3-VL-4B-Instruct``) by the loader.
+         *     Qwen3-VL visual tower. Single-file checkpoints bundle neither config nor tokenizer; the loader
+         *     pulls both from HuggingFace, picking the repo that matches ``variant``.
          */
         Qwen3VLEncoder_Checkpoint_Config: {
             /**
@@ -30291,15 +30291,17 @@ export type components = {
              * @description Whether this model should run on CPU only
              */
             cpu_only: boolean | null;
+            /** @description Qwen3-VL model size variant (4B or 8B) */
+            variant: components["schemas"]["Qwen3VLVariantType"];
         };
         /**
          * Qwen3VLEncoder_Qwen3VLEncoder_Config
          * @description Configuration for standalone Qwen3-VL text encoder models (diffusers-like directory format).
          *
-         *     Used by Krea-2, whose text conditioning comes from a Qwen3-VL model (``Qwen3VLModel``). The model
-         *     weights are expected either in a ``text_encoder`` subfolder of the model directory or directly at the
-         *     root (standalone download). This is distinct from the text-only ``Qwen3Encoder`` (Z-Image / FLUX.2
-         *     Klein) and the Qwen2.5-VL ``QwenVLEncoder`` (Qwen Image).
+         *     Used by Krea-2 (4B) and Ideogram 4 (8B), whose text conditioning comes from a Qwen3-VL model
+         *     (``Qwen3VLModel``). The model weights are expected either in a ``text_encoder`` subfolder of the
+         *     model directory or directly at the root (standalone download). This is distinct from the text-only
+         *     ``Qwen3Encoder`` (Z-Image / FLUX.2 Klein) and the Qwen2.5-VL ``QwenVLEncoder`` (Qwen Image).
          */
         Qwen3VLEncoder_Qwen3VLEncoder_Config: {
             /**
@@ -30377,7 +30379,18 @@ export type components = {
              * @description Whether this model should run on CPU only
              */
             cpu_only: boolean | null;
+            /** @description Qwen3-VL model size variant (4B or 8B) */
+            variant: components["schemas"]["Qwen3VLVariantType"];
         };
+        /**
+         * Qwen3VLVariantType
+         * @description Qwen3-VL (vision-language) text encoder variants based on model size.
+         *
+         *     Distinct from ``Qwen3VariantType``, which covers the text-only Qwen3 encoders. The values are
+         *     prefixed ``qwen3_vl_`` so they don't collide with those in the variant-string adapter.
+         * @enum {string}
+         */
+        Qwen3VLVariantType: "qwen3_vl_4b" | "qwen3_vl_8b";
         /**
          * Qwen3VariantType
          * @description Qwen3 text encoder variants based on model size.
@@ -34026,7 +34039,7 @@ export type components = {
             type: components["schemas"]["ModelType"];
             format?: components["schemas"]["ModelFormat"] | null;
             /** Variant */
-            variant?: components["schemas"]["ModelVariantType"] | components["schemas"]["ClipVariantType"] | components["schemas"]["FluxVariantType"] | components["schemas"]["Flux2VariantType"] | components["schemas"]["ZImageVariantType"] | components["schemas"]["QwenImageVariantType"] | components["schemas"]["WanVariantType"] | components["schemas"]["WanLoRAVariantType"] | components["schemas"]["Qwen3VariantType"] | components["schemas"]["Krea2VariantType"] | components["schemas"]["PiDDecoderVariantType"] | null;
+            variant?: components["schemas"]["ModelVariantType"] | components["schemas"]["ClipVariantType"] | components["schemas"]["FluxVariantType"] | components["schemas"]["Flux2VariantType"] | components["schemas"]["ZImageVariantType"] | components["schemas"]["QwenImageVariantType"] | components["schemas"]["WanVariantType"] | components["schemas"]["WanLoRAVariantType"] | components["schemas"]["Qwen3VariantType"] | components["schemas"]["Qwen3VLVariantType"] | components["schemas"]["Krea2VariantType"] | components["schemas"]["PiDDecoderVariantType"] | null;
             /**
              * Is Installed
              * @default false
@@ -34071,7 +34084,7 @@ export type components = {
             type: components["schemas"]["ModelType"];
             format?: components["schemas"]["ModelFormat"] | null;
             /** Variant */
-            variant?: components["schemas"]["ModelVariantType"] | components["schemas"]["ClipVariantType"] | components["schemas"]["FluxVariantType"] | components["schemas"]["Flux2VariantType"] | components["schemas"]["ZImageVariantType"] | components["schemas"]["QwenImageVariantType"] | components["schemas"]["WanVariantType"] | components["schemas"]["WanLoRAVariantType"] | components["schemas"]["Qwen3VariantType"] | components["schemas"]["Krea2VariantType"] | components["schemas"]["PiDDecoderVariantType"] | null;
+            variant?: components["schemas"]["ModelVariantType"] | components["schemas"]["ClipVariantType"] | components["schemas"]["FluxVariantType"] | components["schemas"]["Flux2VariantType"] | components["schemas"]["ZImageVariantType"] | components["schemas"]["QwenImageVariantType"] | components["schemas"]["WanVariantType"] | components["schemas"]["WanLoRAVariantType"] | components["schemas"]["Qwen3VariantType"] | components["schemas"]["Qwen3VLVariantType"] | components["schemas"]["Krea2VariantType"] | components["schemas"]["PiDDecoderVariantType"] | null;
             /**
              * Is Installed
              * @default false
@@ -34602,7 +34615,7 @@ export type components = {
             path_or_prefix: string;
             model_type: components["schemas"]["ModelType"];
             /** Variant */
-            variant?: components["schemas"]["ModelVariantType"] | components["schemas"]["ClipVariantType"] | components["schemas"]["FluxVariantType"] | components["schemas"]["Flux2VariantType"] | components["schemas"]["ZImageVariantType"] | components["schemas"]["QwenImageVariantType"] | components["schemas"]["WanVariantType"] | components["schemas"]["WanLoRAVariantType"] | components["schemas"]["Qwen3VariantType"] | components["schemas"]["Krea2VariantType"] | components["schemas"]["PiDDecoderVariantType"] | null;
+            variant?: components["schemas"]["ModelVariantType"] | components["schemas"]["ClipVariantType"] | components["schemas"]["FluxVariantType"] | components["schemas"]["Flux2VariantType"] | components["schemas"]["ZImageVariantType"] | components["schemas"]["QwenImageVariantType"] | components["schemas"]["WanVariantType"] | components["schemas"]["WanLoRAVariantType"] | components["schemas"]["Qwen3VariantType"] | components["schemas"]["Qwen3VLVariantType"] | components["schemas"]["Krea2VariantType"] | components["schemas"]["PiDDecoderVariantType"] | null;
         };
         /**
          * Subtract Integers

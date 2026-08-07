@@ -35,7 +35,7 @@ from invokeai.backend.quantization.gguf.loaders import gguf_sd_loader
 from invokeai.backend.util.devices import TorchDevice
 
 
-def _load_local_state_dict(folder: Path, basename: str) -> dict[str, torch.Tensor]:
+def load_local_state_dict(folder: Path, basename: str) -> dict[str, torch.Tensor]:
     """Load a (possibly sharded) safetensors checkpoint from a local diffusers component folder."""
     index_path = folder / f"{basename}.safetensors.index.json"
     if index_path.exists():
@@ -124,7 +124,7 @@ class Ideogram4DiffusersModel(ModelLoader):
         target_device = TorchDevice.choose_torch_device()
         compute_dtype = TorchDevice.choose_bfloat16_safe_dtype(target_device)
 
-        sd = _load_local_state_dict(folder, "diffusion_pytorch_model")
+        sd = load_local_state_dict(folder, "diffusion_pytorch_model")
         self._ram_cache.make_room(sum(t.nelement() * t.element_size() for t in sd.values()))
 
         if is_bnb4bit_state_dict(sd):
@@ -178,7 +178,7 @@ class Ideogram4DiffusersModel(ModelLoader):
         if hasattr(cfg, "quantization_config"):
             cfg.quantization_config = None
 
-        sd = _load_local_state_dict(encoder_path, "model")
+        sd = load_local_state_dict(encoder_path, "model")
         self._ram_cache.make_room(sum(t.nelement() * t.element_size() for t in sd.values()))
 
         if raw_cfg.get(FP8_TEXT_ENCODER_CONFIG_FLAG, False):

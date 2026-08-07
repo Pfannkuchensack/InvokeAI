@@ -68,7 +68,14 @@ const ParamKrea2Qwen3VlEncoderModelSelect = memo(() => {
   const dispatch = useAppDispatch();
   const { t } = useTranslation();
   const krea2Qwen3VlEncoderModel = useAppSelector(selectKrea2Qwen3VlEncoderModel);
-  const [modelConfigs, { isLoading }] = useQwen3VLEncoderModels();
+  const [allModelConfigs, { isLoading }] = useQwen3VLEncoderModels();
+
+  // Krea-2 conditions on Qwen3-VL 4B. Ideogram 4's 8B is the same model type but a 4096-wide hidden
+  // state, so offering it here would only produce a shape error deep inside inference.
+  const modelConfigs = useMemo(
+    () => allModelConfigs.filter((config) => config.variant === 'qwen3_vl_4b'),
+    [allModelConfigs]
+  );
 
   const _onChange = useCallback(
     (model: Qwen3VLEncoderModelConfig | null) => {

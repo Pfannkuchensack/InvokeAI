@@ -18,6 +18,7 @@ import type {
   zModelFormat,
   zModelVariantType,
   zQwen3VariantType,
+  zQwen3VLVariantType,
   zSubModelType,
   zZImageVariantType,
 } from 'features/nodes/types/common';
@@ -55,6 +56,7 @@ describe('Common types', () => {
   test('ZImageVariantType', () => assert<Equals<z.infer<typeof zZImageVariantType>, S['ZImageVariantType']>>());
   test('Krea2VariantType', () => assert<Equals<z.infer<typeof zKrea2VariantType>, S['Krea2VariantType']>>());
   test('Qwen3VariantType', () => assert<Equals<z.infer<typeof zQwen3VariantType>, S['Qwen3VariantType']>>());
+  test('Qwen3VLVariantType', () => assert<Equals<z.infer<typeof zQwen3VLVariantType>, S['Qwen3VLVariantType']>>());
   test('ModelFormat', () => assert<Equals<z.infer<typeof zModelFormat>, S['ModelFormat']>>());
 
   // Misc types

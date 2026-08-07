@@ -201,6 +201,9 @@ const zWanVariantType = z.enum(['t2v_a14b', 'i2v_a14b', 'ti2v_5b']);
  *  targets. A14B = inner_dim 5120 (both T2V and I2V), 5B = inner_dim 3072. */
 const zWanLoRAVariantType = z.enum(['a14b', '5b']);
 export const zQwen3VariantType = z.enum(['qwen3_4b', 'qwen3_8b', 'qwen3_06b']);
+/** Qwen3-VL (vision-language) encoder sizes — Krea-2 uses the 4B, Ideogram 4 the 8B. Separate from
+ *  zQwen3VariantType, which covers the text-only Qwen3 encoders. */
+export const zQwen3VLVariantType = z.enum(['qwen3_vl_4b', 'qwen3_vl_8b']);
 const zPiDDecoderVariantType = z.enum(['res2k_sr4x', 'res2kto4k_sr4x']);
 export const zAnyModelVariant = z.union([
   zModelVariantType,
@@ -213,6 +216,7 @@ export const zAnyModelVariant = z.union([
   zWanVariantType,
   zWanLoRAVariantType,
   zQwen3VariantType,
+  zQwen3VLVariantType,
   zPiDDecoderVariantType,
 ]);
 export type AnyModelVariant = z.infer<typeof zAnyModelVariant>;

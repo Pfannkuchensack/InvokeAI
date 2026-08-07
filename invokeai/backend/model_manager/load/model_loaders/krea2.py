@@ -22,6 +22,7 @@ from invokeai.backend.model_manager.taxonomy import (
     BaseModelType,
     ModelFormat,
     ModelType,
+    Qwen3VLVariantType,
     SubModelType,
 )
 from invokeai.backend.quantization.gguf.loaders import gguf_sd_loader
@@ -443,6 +444,8 @@ class Qwen3VLEncoderLoader(ModelLoader):
                 te_config = _normalize_qwen3vl_rope_config(
                     AutoConfig.from_pretrained(text_encoder_path, local_files_only=True)
                 )
+                if self._is_invoke_fp8_encoder(text_encoder_path):
+                    return self._load_invoke_fp8_encoder(text_encoder_path, te_config, model_dtype)
                 return Qwen3VLModel.from_pretrained(
                     text_encoder_path,
                     config=te_config,
@@ -455,6 +458,52 @@ class Qwen3VLEncoderLoader(ModelLoader):
             f"Only Tokenizer and TextEncoder submodels are supported. "
             f"Received: {submodel_type.value if submodel_type else 'None'}"
         )
+
+    @staticmethod
+    def _is_invoke_fp8_encoder(path: Path) -> bool:
+        """True for Invoke's own weight-only fp8 layout, flagged in the component's config.json.
+
+        Distinct from ComfyUI's 'scaled fp8' (handled in the single-file loader): here the fp8 weights
+        sit alongside per-row ``.weight_scale`` buffers and ``from_pretrained`` cannot read them.
+        Ideogram 4's bundled encoder is shipped this way.
+        """
+        import json
+
+        from invokeai.backend.ideogram4.quantized_loading import FP8_TEXT_ENCODER_CONFIG_FLAG
+
+        config_path = path / "config.json"
+        if not config_path.is_file():
+            return False
+        try:
+            return bool(json.loads(config_path.read_text(encoding="utf-8")).get(FP8_TEXT_ENCODER_CONFIG_FLAG, False))
+        except (json.JSONDecodeError, OSError):
+            return False
+
+    def _load_invoke_fp8_encoder(self, path: Path, te_config: Any, model_dtype: Any) -> AnyModel:
+        """Build the bare architecture, swap in fp8 Linears, then fill them — as Ideogram 4 does.
+
+        Kept fp8-resident rather than dequantized, which is the point of shipping fp8 at all.
+        """
+        import torch
+        from transformers import AutoModel
+
+        from invokeai.backend.ideogram4.quantized_loading import load_fp8_state_dict, swap_linears_to_fp8
+        from invokeai.backend.model_manager.load.model_loaders.ideogram4 import load_local_state_dict
+
+        sd = load_local_state_dict(path, "model")
+        self._ram_cache.make_room(sum(t.nelement() * t.element_size() for t in sd.values()))
+
+        with accelerate.init_empty_weights():
+            model = AutoModel.from_config(te_config)
+            swap_linears_to_fp8(model, sd, compute_dtype=model_dtype)
+        # strict=False tolerates the tied embedding weights transformers resolves itself; unexpected
+        # keys still raise, and _reject_incomplete_load catches anything genuinely missing.
+        load_fp8_state_dict(model, sd, device=torch.device("cpu"), dtype=model_dtype, assign=True, strict=False)
+        if hasattr(model, "tie_weights"):
+            model.tie_weights()
+        _reject_incomplete_load(model, what="Qwen3-VL fp8 text encoder")
+        model.eval()
+        return model
 
 
 def _remap_qwen3vl_singlefile_keys(sd: dict[str, Any]) -> dict[str, Any]:
@@ -511,11 +560,14 @@ class Qwen3VLEncoderCheckpointLoader(ModelLoader):
     """Loads a single-file Qwen3-VL encoder checkpoint (e.g. ComfyUI ``qwen3vl_4b_bf16`` / ``_fp8_scaled``).
 
     The checkpoint bundles the language model + visual tower but no config/tokenizer; those are pulled
-    from HuggingFace (``Qwen/Qwen3-VL-4B-Instruct``) with offline-cache fallback. ComfyUI 'scaled fp8'
-    weights are dequantized to the compute dtype on load.
+    from the HuggingFace repo matching the recorded size variant, with offline-cache fallback.
+    ComfyUI 'scaled fp8' weights are dequantized to the compute dtype on load.
     """
 
-    DEFAULT_HF_REPO = "Qwen/Qwen3-VL-4B-Instruct"
+    HF_REPO_BY_VARIANT = {
+        Qwen3VLVariantType.Qwen3VL_4B: "Qwen/Qwen3-VL-4B-Instruct",
+        Qwen3VLVariantType.Qwen3VL_8B: "Qwen/Qwen3-VL-8B-Instruct",
+    }
 
     def _load_model(
         self,
@@ -525,30 +577,32 @@ class Qwen3VLEncoderCheckpointLoader(ModelLoader):
         if not isinstance(config, Qwen3VLEncoder_Checkpoint_Config):
             raise ValueError("Only Qwen3VLEncoder_Checkpoint_Config models are supported here.")
 
+        repo = self.HF_REPO_BY_VARIANT[config.variant]
+
         match submodel_type:
             case SubModelType.Tokenizer:
-                return self._load_tokenizer()
+                return self._load_tokenizer(repo)
             case SubModelType.TextEncoder:
-                return self._load_text_encoder(config)
+                return self._load_text_encoder(config, repo)
 
         raise ValueError(
             f"Only Tokenizer and TextEncoder submodels are supported. "
             f"Received: {submodel_type.value if submodel_type else 'None'}"
         )
 
-    def _load_tokenizer(self) -> AnyModel:
+    def _load_tokenizer(self, repo: str) -> AnyModel:
         # A partial offline cache (e.g. config present but vocab/merges missing) raises something other
         # than OSError (e.g. TypeError) deep in the slow-tokenizer path, so catch broadly and re-fetch.
         try:
-            return AutoTokenizer.from_pretrained(self.DEFAULT_HF_REPO, local_files_only=True, extra_special_tokens={})
+            return AutoTokenizer.from_pretrained(repo, local_files_only=True, extra_special_tokens={})
         except Exception:
-            return AutoTokenizer.from_pretrained(self.DEFAULT_HF_REPO, extra_special_tokens={})
+            return AutoTokenizer.from_pretrained(repo, extra_special_tokens={})
 
-    def _load_hf_config(self) -> Any:
+    def _load_hf_config(self, repo: str) -> Any:
         try:
-            te_config = AutoConfig.from_pretrained(self.DEFAULT_HF_REPO, local_files_only=True)
+            te_config = AutoConfig.from_pretrained(repo, local_files_only=True)
         except Exception:
-            te_config = AutoConfig.from_pretrained(self.DEFAULT_HF_REPO)
+            te_config = AutoConfig.from_pretrained(repo)
         return _normalize_qwen3vl_rope_config(te_config)
 
     def _load_text_encoder(self, config: Qwen3VLEncoder_Checkpoint_Config) -> AnyModel:

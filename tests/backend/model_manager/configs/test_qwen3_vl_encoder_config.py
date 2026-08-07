@@ -18,7 +18,12 @@ from invokeai.backend.model_manager.configs.qwen3_vl_encoder import (
     _is_qwen3_vl_encoder_state_dict,
 )
 from invokeai.backend.model_manager.model_on_disk import ModelOnDisk
-from invokeai.backend.model_manager.taxonomy import BaseModelType, ModelFormat, ModelType
+from invokeai.backend.model_manager.taxonomy import (
+    BaseModelType,
+    ModelFormat,
+    ModelType,
+    Qwen3VLVariantType,
+)
 
 _REQUIRED_FIELDS = {
     "hash": "blake3:fakehash",
@@ -117,7 +122,8 @@ class TestQwen3VLEncoderCheckpointConfig:
 
     @patch("invokeai.backend.model_manager.configs.qwen3_vl_encoder.raise_if_not_file")
     @patch("invokeai.backend.model_manager.configs.qwen3_vl_encoder.raise_for_override_fields")
-    def test_rejects_non_4b_checkpoint_shape(self, _rfo, _rif) -> None:
+    def test_classifies_8b_checkpoint_shape(self, _rfo, _rif) -> None:
+        """A 4096-wide checkpoint is the 8B (Ideogram 4), not a mismatch to reject."""
         mod = self._make_mock_mod(
             {
                 "model.embed_tokens.weight": MagicMock(shape=(151936, 4096)),
@@ -126,7 +132,22 @@ class TestQwen3VLEncoderCheckpointConfig:
             }
         )
 
-        with pytest.raises(NotAMatchError, match="4B|hidden"):
+        config = Qwen3VLEncoder_Checkpoint_Config.from_model_on_disk(mod, {**_REQUIRED_FIELDS})
+
+        assert config.variant is Qwen3VLVariantType.Qwen3VL_8B
+
+    @patch("invokeai.backend.model_manager.configs.qwen3_vl_encoder.raise_if_not_file")
+    @patch("invokeai.backend.model_manager.configs.qwen3_vl_encoder.raise_for_override_fields")
+    def test_rejects_unsupported_checkpoint_hidden_size(self, _rfo, _rif) -> None:
+        mod = self._make_mock_mod(
+            {
+                "model.embed_tokens.weight": MagicMock(shape=(151936, 1536)),
+                "model.layers.35.self_attn.q_proj.weight": object(),
+                "model.visual.blocks.0.attn.qkv.weight": object(),
+            }
+        )
+
+        with pytest.raises(NotAMatchError, match="hidden size"):
             Qwen3VLEncoder_Checkpoint_Config.from_model_on_disk(mod, {**_REQUIRED_FIELDS})
 
 
@@ -181,13 +202,35 @@ class TestQwen3VLEncoderDirectoryConfig:
 
         assert config.format is ModelFormat.Qwen3VLEncoder
 
-    @pytest.mark.parametrize(("hidden_size", "num_hidden_layers"), [(4096, 36), (2560, 28)])
-    def test_rejects_non_4b_directory_config(self, tmp_path: Path, hidden_size: int, num_hidden_layers: int) -> None:
+    @pytest.mark.parametrize(
+        ("hidden_size", "expected_variant"),
+        [(2560, Qwen3VLVariantType.Qwen3VL_4B), (4096, Qwen3VLVariantType.Qwen3VL_8B)],
+    )
+    def test_classifies_size_variant(
+        self, tmp_path: Path, hidden_size: int, expected_variant: Qwen3VLVariantType
+    ) -> None:
+        """Krea-2 needs the 4B and Ideogram 4 the 8B, so the size is recorded rather than rejected."""
+        self._write_config(tmp_path / "config.json", hidden_size=hidden_size)
+        (tmp_path / "model.safetensors").touch()
+        (tmp_path / "tokenizer.json").touch()
+
+        config = Qwen3VLEncoder_Qwen3VLEncoder_Config.from_model_on_disk(ModelOnDisk(tmp_path), self._fields(tmp_path))
+
+        assert config.variant is expected_variant
+
+    def test_variant_stays_out_of_the_discriminator_tag(self) -> None:
+        """A variant field with a default would be folded into the tag, breaking existing records."""
+        assert "qwen3_vl_4b" not in Qwen3VLEncoder_Qwen3VLEncoder_Config.get_tag().tag
+        assert "qwen3_vl_8b" not in Qwen3VLEncoder_Qwen3VLEncoder_Config.get_tag().tag
+
+    @pytest.mark.parametrize(("hidden_size", "num_hidden_layers"), [(1536, 36), (2560, 28)])
+    def test_rejects_unsupported_geometry(self, tmp_path: Path, hidden_size: int, num_hidden_layers: int) -> None:
+        """An unknown hidden size, or a layer count that can't supply layer 35, is still no match."""
         self._write_config(tmp_path / "config.json", hidden_size=hidden_size, num_hidden_layers=num_hidden_layers)
         (tmp_path / "model.safetensors").touch()
         (tmp_path / "tokenizer.json").touch()
 
-        with pytest.raises(NotAMatchError, match="4B|hidden|layers"):
+        with pytest.raises(NotAMatchError, match="hidden size|layers"):
             Qwen3VLEncoder_Qwen3VLEncoder_Config.from_model_on_disk(ModelOnDisk(tmp_path), self._fields(tmp_path))
 
     def test_rejects_malformed_text_config(self, tmp_path: Path) -> None:

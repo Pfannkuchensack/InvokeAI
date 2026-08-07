@@ -2103,6 +2103,18 @@ ideogram_4_fp8 = StarterModel(
 #
 # q8_0 is deliberately not offered: at ~18.9GiB per pair it is larger than the fp8 build it would
 # replace, with no quality gain.
+# Ideogram 4 conditions on stock Qwen3-VL 8B (Krea-2 uses the 4B, hence the separate entry). This is
+# the standalone alternative to keeping a full Diffusers Ideogram 4 install around just for the encoder.
+qwen3_vl_encoder_8b = StarterModel(
+    name="Qwen3-VL 8B Encoder (Diffusers)",
+    base=BaseModelType.Any,
+    source="Qwen/Qwen3-VL-8B-Instruct",
+    description="Qwen3-VL 8B text encoder (Qwen3VLModel) used by Ideogram 4, in HuggingFace folder "
+    "layout (includes tokenizer). Use with GGUF Ideogram 4 transformers. (~16GB)",
+    type=ModelType.Qwen3VLEncoder,
+    format=ModelFormat.Qwen3VLEncoder,
+)
+
 ideogram_4_gguf_unconditional_q4_0 = StarterModel(
     name="Ideogram 4 Unconditional Transformer (Q4_0)",
     base=BaseModelType.Ideogram4,
@@ -2118,12 +2130,11 @@ ideogram_4_gguf_q4_0 = StarterModel(
     base=BaseModelType.Ideogram4,
     source="https://huggingface.co/molbal/ideogram-4-gguf/resolve/main/ideogram4-transformer-q4_0.gguf",
     description="Ideogram 4 conditional transformer, GGUF Q4_0 — the smallest option. Pick this as the "
-    "main model; the unconditional partner and the VAE come with it. Still needs a Qwen3-VL text "
-    "encoder: either a standalone one, or an installed Diffusers Ideogram 4 model to take it from. "
-    "~11.3GB for both transformers",
+    "main model; the unconditional partner, the VAE and the Qwen3-VL 8B encoder come with it. "
+    "~11.3GB for both transformers, ~16GB for the encoder",
     type=ModelType.Main,
     format=ModelFormat.GGUFQuantized,
-    dependencies=[ideogram_4_gguf_unconditional_q4_0, flux2_vae],
+    dependencies=[ideogram_4_gguf_unconditional_q4_0, flux2_vae, qwen3_vl_encoder_8b],
 )
 
 ideogram_4_gguf_unconditional_q5_1 = StarterModel(
@@ -2141,12 +2152,11 @@ ideogram_4_gguf_q5_1 = StarterModel(
     base=BaseModelType.Ideogram4,
     source="https://huggingface.co/molbal/ideogram-4-gguf/resolve/main/ideogram4-transformer-q5_1.gguf",
     description="Ideogram 4 conditional transformer, GGUF Q5_1 — the highest quantization that still "
-    "stays well under the fp8 build. Pick this as the main model; the unconditional partner and the VAE "
-    "come with it. Still needs a Qwen3-VL text encoder: either a standalone one, or an installed "
-    "Diffusers Ideogram 4 model to take it from. ~14.7GB for both transformers",
+    "stays well under the fp8 build. Pick this as the main model; the unconditional partner, the VAE "
+    "and the Qwen3-VL 8B encoder come with it. ~14.7GB for both transformers, ~16GB for the encoder",
     type=ModelType.Main,
     format=ModelFormat.GGUFQuantized,
-    dependencies=[ideogram_4_gguf_unconditional_q5_1, flux2_vae],
+    dependencies=[ideogram_4_gguf_unconditional_q5_1, flux2_vae, qwen3_vl_encoder_8b],
 )
 # endregion
 
@@ -2162,6 +2172,7 @@ STARTER_MODELS: list[StarterModel] = [
     sd35_large,
     ideogram_4_nf4,
     ideogram_4_fp8,
+    qwen3_vl_encoder_8b,
     ideogram_4_gguf_q4_0,
     ideogram_4_gguf_unconditional_q4_0,
     ideogram_4_gguf_q5_1,

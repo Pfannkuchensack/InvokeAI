@@ -303,6 +303,8 @@ export const MODEL_VARIANT_TO_LONG_NAME: Record<AnyModelVariant, string> = {
   qwen3_4b: 'Qwen3 4B',
   qwen3_8b: 'Qwen3 8B',
   qwen3_06b: 'Qwen3 0.6B',
+  qwen3_vl_4b: 'Qwen3-VL 4B',
+  qwen3_vl_8b: 'Qwen3-VL 8B',
   res2k_sr4x: 'PiD 2K (4x SR)',
   res2kto4k_sr4x: 'PiD 4K (4x SR Upscale)',
 };

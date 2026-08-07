@@ -248,6 +248,20 @@ class Qwen3VariantType(str, Enum):
     """Qwen3 0.6B text encoder (hidden_size=1024). Used by Anima."""
 
 
+class Qwen3VLVariantType(str, Enum):
+    """Qwen3-VL (vision-language) text encoder variants based on model size.
+
+    Distinct from ``Qwen3VariantType``, which covers the text-only Qwen3 encoders. The values are
+    prefixed ``qwen3_vl_`` so they don't collide with those in the variant-string adapter.
+    """
+
+    Qwen3VL_4B = "qwen3_vl_4b"
+    """Qwen3-VL 4B (text hidden_size=2560). Used by Krea-2."""
+
+    Qwen3VL_8B = "qwen3_vl_8b"
+    """Qwen3-VL 8B (text hidden_size=4096). Used by Ideogram 4."""
+
+
 class PiDDecoderVariantType(str, Enum):
     """PiD (Pixel Diffusion Decoder) resolution presets distributed by NVIDIA.
 
@@ -341,6 +355,7 @@ AnyVariant: TypeAlias = Union[
     WanVariantType,
     WanLoRAVariantType,
     Qwen3VariantType,
+    Qwen3VLVariantType,
     Krea2VariantType,
     PiDDecoderVariantType,
 ]
@@ -354,6 +369,7 @@ variant_type_adapter = TypeAdapter[
     | WanVariantType
     | WanLoRAVariantType
     | Qwen3VariantType
+    | Qwen3VLVariantType
     | Krea2VariantType
     | PiDDecoderVariantType
 ](
@@ -366,6 +382,7 @@ variant_type_adapter = TypeAdapter[
     | WanVariantType
     | WanLoRAVariantType
     | Qwen3VariantType
+    | Qwen3VLVariantType
     | Krea2VariantType
     | PiDDecoderVariantType
 )

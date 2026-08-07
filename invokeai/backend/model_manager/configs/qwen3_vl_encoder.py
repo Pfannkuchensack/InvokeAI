@@ -13,27 +13,41 @@ from invokeai.backend.model_manager.configs.identification_utils import (
     raise_if_not_file,
 )
 from invokeai.backend.model_manager.model_on_disk import ModelOnDisk
-from invokeai.backend.model_manager.taxonomy import BaseModelType, ModelFormat, ModelType
+from invokeai.backend.model_manager.taxonomy import BaseModelType, ModelFormat, ModelType, Qwen3VLVariantType
 
-_KREA2_QWEN3_VL_HIDDEN_SIZE = 2560
-_KREA2_QWEN3_VL_NUM_HIDDEN_LAYERS = 36
+# Text-tower hidden sizes of the two Qwen3-VL sizes we support. Both have 36 layers.
+_QWEN3_VL_HIDDEN_SIZES = {
+    2560: Qwen3VLVariantType.Qwen3VL_4B,
+    4096: Qwen3VLVariantType.Qwen3VL_8B,
+}
+_QWEN3_VL_NUM_HIDDEN_LAYERS = 36
 
 
-def _validate_krea2_qwen3_vl_config(config_path: Path) -> None:
+def _detect_qwen3_vl_variant(config_path: Path) -> Qwen3VLVariantType:
+    """Classify a Qwen3-VL encoder by its text-tower hidden size.
+
+    Krea-2 needs the 4B, Ideogram 4 the 8B; both tap hidden states up to layer 35, so a model with a
+    different layer count is rejected outright. Recording the size as a variant (rather than
+    rejecting everything but 4B, as this did while Krea-2 was the only consumer) is what lets the
+    pickers offer each base the encoder it can actually use — a mismatch would otherwise surface as
+    a shape error deep inside inference.
+    """
     config = get_config_dict_or_raise(config_path)
     text_config = config.get("text_config", config)
     if not isinstance(text_config, dict):
         raise NotAMatchError("Qwen3-VL text_config must be an object")
-    hidden_size = text_config.get("hidden_size")
+
     num_hidden_layers = text_config.get("num_hidden_layers")
-    if hidden_size != _KREA2_QWEN3_VL_HIDDEN_SIZE:
+    if num_hidden_layers != _QWEN3_VL_NUM_HIDDEN_LAYERS:
+        raise NotAMatchError(f"expected {_QWEN3_VL_NUM_HIDDEN_LAYERS} Qwen3-VL layers, got {num_hidden_layers}")
+
+    hidden_size = text_config.get("hidden_size")
+    variant = _QWEN3_VL_HIDDEN_SIZES.get(hidden_size) if isinstance(hidden_size, int) else None
+    if variant is None:
         raise NotAMatchError(
-            f"Krea-2 requires the Qwen3-VL 4B hidden size {_KREA2_QWEN3_VL_HIDDEN_SIZE}, got {hidden_size}"
+            f"unsupported Qwen3-VL hidden size {hidden_size}; expected one of {sorted(_QWEN3_VL_HIDDEN_SIZES)}"
         )
-    if num_hidden_layers != _KREA2_QWEN3_VL_NUM_HIDDEN_LAYERS:
-        raise NotAMatchError(
-            f"Krea-2 requires {_KREA2_QWEN3_VL_NUM_HIDDEN_LAYERS} Qwen3-VL layers, got {num_hidden_layers}"
-        )
+    return variant
 
 
 def _has_complete_pretrained_weights(weights_path: Path) -> bool:
@@ -65,7 +79,8 @@ def _has_complete_pretrained_weights(weights_path: Path) -> bool:
     return False
 
 
-def _validate_krea2_qwen3_vl_checkpoint_shape(state_dict: dict[str | int, Any]) -> None:
+def _detect_qwen3_vl_checkpoint_variant(state_dict: dict[str | int, Any]) -> Qwen3VLVariantType:
+    """Classify a single-file Qwen3-VL encoder by the embedding's hidden size. See ``_detect_qwen3_vl_variant``."""
     embed_keys = (
         "model.embed_tokens.weight",
         "model.language_model.embed_tokens.weight",
@@ -74,29 +89,32 @@ def _validate_krea2_qwen3_vl_checkpoint_shape(state_dict: dict[str | int, Any]) 
     )
     embed = next((state_dict[key] for key in embed_keys if key in state_dict), None)
     shape = getattr(embed, "shape", ())
-    if len(shape) < 2 or shape[1] != _KREA2_QWEN3_VL_HIDDEN_SIZE:
-        hidden_size = shape[1] if len(shape) >= 2 else None
+    hidden_size = shape[1] if len(shape) >= 2 else None
+    variant = _QWEN3_VL_HIDDEN_SIZES.get(hidden_size) if isinstance(hidden_size, int) else None
+    if variant is None:
         raise NotAMatchError(
-            f"Krea-2 requires a Qwen3-VL 4B checkpoint with hidden size "
-            f"{_KREA2_QWEN3_VL_HIDDEN_SIZE}, got {hidden_size}"
+            f"unsupported Qwen3-VL hidden size {hidden_size}; expected one of {sorted(_QWEN3_VL_HIDDEN_SIZES)}"
         )
     if not any(isinstance(key, str) and ".layers.35." in key for key in state_dict):
-        raise NotAMatchError("Krea-2 requires a Qwen3-VL 4B checkpoint containing language-model layer 35")
+        raise NotAMatchError("Qwen3-VL encoder checkpoint is missing language-model layer 35")
+    return variant
 
 
 class Qwen3VLEncoder_Qwen3VLEncoder_Config(Config_Base):
     """Configuration for standalone Qwen3-VL text encoder models (diffusers-like directory format).
 
-    Used by Krea-2, whose text conditioning comes from a Qwen3-VL model (``Qwen3VLModel``). The model
-    weights are expected either in a ``text_encoder`` subfolder of the model directory or directly at the
-    root (standalone download). This is distinct from the text-only ``Qwen3Encoder`` (Z-Image / FLUX.2
-    Klein) and the Qwen2.5-VL ``QwenVLEncoder`` (Qwen Image).
+    Used by Krea-2 (4B) and Ideogram 4 (8B), whose text conditioning comes from a Qwen3-VL model
+    (``Qwen3VLModel``). The model weights are expected either in a ``text_encoder`` subfolder of the
+    model directory or directly at the root (standalone download). This is distinct from the text-only
+    ``Qwen3Encoder`` (Z-Image / FLUX.2 Klein) and the Qwen2.5-VL ``QwenVLEncoder`` (Qwen Image).
     """
 
     base: Literal[BaseModelType.Any] = Field(default=BaseModelType.Any)
     type: Literal[ModelType.Qwen3VLEncoder] = Field(default=ModelType.Qwen3VLEncoder)
     format: Literal[ModelFormat.Qwen3VLEncoder] = Field(default=ModelFormat.Qwen3VLEncoder)
     cpu_only: bool | None = Field(default=None, description="Whether this model should run on CPU only")
+    # No default on purpose: a variant field with one would be folded into the discriminator tag.
+    variant: Qwen3VLVariantType = Field(description="Qwen3-VL model size variant (4B or 8B)")
 
     @classmethod
     def from_model_on_disk(cls, mod: ModelOnDisk, override_fields: dict[str, Any]) -> Self:
@@ -132,7 +150,7 @@ class Qwen3VLEncoder_Qwen3VLEncoder_Config(Config_Base):
                 "Qwen3VLForConditionalGeneration",
             },
         )
-        _validate_krea2_qwen3_vl_config(expected_config_path)
+        variant = override_fields.pop("variant", None) or _detect_qwen3_vl_variant(expected_config_path)
 
         if config_path_nested.exists():
             weights_path = mod.path / "text_encoder"
@@ -150,7 +168,7 @@ class Qwen3VLEncoder_Qwen3VLEncoder_Config(Config_Base):
         if not has_tokenizer:
             raise NotAMatchError("standalone Qwen3-VL encoder directory does not contain tokenizer files")
 
-        return cls(**override_fields)
+        return cls(**override_fields, variant=variant)
 
 
 def _is_qwen3_vl_encoder_state_dict(state_dict: dict[str | int, Any]) -> bool:
@@ -169,14 +187,16 @@ class Qwen3VLEncoder_Checkpoint_Config(Checkpoint_Config_Base, Config_Base):
     """Configuration for a single-file Qwen3-VL text encoder checkpoint (e.g. ComfyUI ``qwen3vl_4b_*``).
 
     Distinguished from the text-only ``Qwen3Encoder`` checkpoint (Z-Image) by the presence of the
-    Qwen3-VL visual tower. The tokenizer is not bundled in single-file checkpoints and is pulled from
-    HuggingFace (``Qwen/Qwen3-VL-4B-Instruct``) by the loader.
+    Qwen3-VL visual tower. Single-file checkpoints bundle neither config nor tokenizer; the loader
+    pulls both from HuggingFace, picking the repo that matches ``variant``.
     """
 
     base: Literal[BaseModelType.Any] = Field(default=BaseModelType.Any)
     type: Literal[ModelType.Qwen3VLEncoder] = Field(default=ModelType.Qwen3VLEncoder)
     format: Literal[ModelFormat.Checkpoint] = Field(default=ModelFormat.Checkpoint)
     cpu_only: bool | None = Field(default=None, description="Whether this model should run on CPU only")
+    # No default on purpose: a variant field with one would be folded into the discriminator tag.
+    variant: Qwen3VLVariantType = Field(description="Qwen3-VL model size variant (4B or 8B)")
 
     @classmethod
     def from_model_on_disk(cls, mod: ModelOnDisk, override_fields: dict[str, Any]) -> Self:
@@ -190,6 +210,7 @@ class Qwen3VLEncoder_Checkpoint_Config(Checkpoint_Config_Base, Config_Base):
         state_dict = mod.load_state_dict()
         if not _is_qwen3_vl_encoder_state_dict(state_dict):
             raise NotAMatchError("state dict does not look like a single-file Qwen3-VL encoder")
-        _validate_krea2_qwen3_vl_checkpoint_shape(state_dict)
 
-        return cls(**override_fields)
+        variant = override_fields.pop("variant", None) or _detect_qwen3_vl_checkpoint_variant(state_dict)
+
+        return cls(**override_fields, variant=variant)

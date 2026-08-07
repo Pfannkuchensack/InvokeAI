@@ -67243,6 +67243,9 @@
                 "$ref": "#/components/schemas/Qwen3VariantType"
               },
               {
+                "$ref": "#/components/schemas/Qwen3VLVariantType"
+              },
+              {
                 "$ref": "#/components/schemas/Krea2VariantType"
               },
               {
@@ -71637,6 +71640,10 @@
             ],
             "title": "Cpu Only",
             "description": "Whether this model should run on CPU only"
+          },
+          "variant": {
+            "$ref": "#/components/schemas/Qwen3VLVariantType",
+            "description": "Qwen3-VL model size variant (4B or 8B)"
           }
         },
         "type": "object",
@@ -71656,10 +71663,11 @@
           "base",
           "type",
           "format",
-          "cpu_only"
+          "cpu_only",
+          "variant"
         ],
         "title": "Qwen3VLEncoder_Checkpoint_Config",
-        "description": "Configuration for a single-file Qwen3-VL text encoder checkpoint (e.g. ComfyUI ``qwen3vl_4b_*``).\n\nDistinguished from the text-only ``Qwen3Encoder`` checkpoint (Z-Image) by the presence of the\nQwen3-VL visual tower. The tokenizer is not bundled in single-file checkpoints and is pulled from\nHuggingFace (``Qwen/Qwen3-VL-4B-Instruct``) by the loader."
+        "description": "Configuration for a single-file Qwen3-VL text encoder checkpoint (e.g. ComfyUI ``qwen3vl_4b_*``).\n\nDistinguished from the text-only ``Qwen3Encoder`` checkpoint (Z-Image) by the presence of the\nQwen3-VL visual tower. Single-file checkpoints bundle neither config nor tokenizer; the loader\npulls both from HuggingFace, picking the repo that matches ``variant``."
       },
       "Qwen3VLEncoder_Qwen3VLEncoder_Config": {
         "properties": {
@@ -71774,6 +71782,10 @@
             ],
             "title": "Cpu Only",
             "description": "Whether this model should run on CPU only"
+          },
+          "variant": {
+            "$ref": "#/components/schemas/Qwen3VLVariantType",
+            "description": "Qwen3-VL model size variant (4B or 8B)"
           }
         },
         "type": "object",
@@ -71792,10 +71804,17 @@
           "base",
           "type",
           "format",
-          "cpu_only"
+          "cpu_only",
+          "variant"
         ],
         "title": "Qwen3VLEncoder_Qwen3VLEncoder_Config",
-        "description": "Configuration for standalone Qwen3-VL text encoder models (diffusers-like directory format).\n\nUsed by Krea-2, whose text conditioning comes from a Qwen3-VL model (``Qwen3VLModel``). The model\nweights are expected either in a ``text_encoder`` subfolder of the model directory or directly at the\nroot (standalone download). This is distinct from the text-only ``Qwen3Encoder`` (Z-Image / FLUX.2\nKlein) and the Qwen2.5-VL ``QwenVLEncoder`` (Qwen Image)."
+        "description": "Configuration for standalone Qwen3-VL text encoder models (diffusers-like directory format).\n\nUsed by Krea-2 (4B) and Ideogram 4 (8B), whose text conditioning comes from a Qwen3-VL model\n(``Qwen3VLModel``). The model weights are expected either in a ``text_encoder`` subfolder of the\nmodel directory or directly at the root (standalone download). This is distinct from the text-only\n``Qwen3Encoder`` (Z-Image / FLUX.2 Klein) and the Qwen2.5-VL ``QwenVLEncoder`` (Qwen Image)."
+      },
+      "Qwen3VLVariantType": {
+        "type": "string",
+        "enum": ["qwen3_vl_4b", "qwen3_vl_8b"],
+        "title": "Qwen3VLVariantType",
+        "description": "Qwen3-VL (vision-language) text encoder variants based on model size.\n\nDistinct from ``Qwen3VariantType``, which covers the text-only Qwen3 encoders. The values are\nprefixed ``qwen3_vl_`` so they don't collide with those in the variant-string adapter."
       },
       "Qwen3VariantType": {
         "type": "string",
@@ -78964,6 +78983,9 @@
                 "$ref": "#/components/schemas/Qwen3VariantType"
               },
               {
+                "$ref": "#/components/schemas/Qwen3VLVariantType"
+              },
+              {
                 "$ref": "#/components/schemas/Krea2VariantType"
               },
               {
@@ -79134,6 +79156,9 @@
               },
               {
                 "$ref": "#/components/schemas/Qwen3VariantType"
+              },
+              {
+                "$ref": "#/components/schemas/Qwen3VLVariantType"
               },
               {
                 "$ref": "#/components/schemas/Krea2VariantType"
@@ -80081,6 +80106,9 @@
               },
               {
                 "$ref": "#/components/schemas/Qwen3VariantType"
+              },
+              {
+                "$ref": "#/components/schemas/Qwen3VLVariantType"
               },
               {
                 "$ref": "#/components/schemas/Krea2VariantType"

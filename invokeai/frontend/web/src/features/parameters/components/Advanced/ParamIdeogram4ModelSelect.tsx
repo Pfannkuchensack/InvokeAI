@@ -10,7 +10,7 @@ import {
   selectIdeogram4VaeModel,
 } from 'features/controlLayers/store/paramsSlice';
 import { zModelIdentifierField } from 'features/nodes/types/common';
-import { memo, useCallback } from 'react';
+import { memo, useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
   useFlux2VAEModels,
@@ -125,8 +125,15 @@ const ParamIdeogram4Qwen3EncoderModelSelect = memo(() => {
   const dispatch = useAppDispatch();
   const { t } = useTranslation();
   const selectedModel = useAppSelector(selectIdeogram4Qwen3EncoderModel);
-  const [modelConfigs, { isLoading }] = useQwen3VLEncoderModels();
+  const [allModelConfigs, { isLoading }] = useQwen3VLEncoderModels();
   const [diffusersModels] = useIdeogram4DiffusersModels();
+
+  // Ideogram 4 conditions on Qwen3-VL 8B; Krea-2's 4B has a 2560-wide hidden state and would fail
+  // with a shape error deep inside inference, so it must not be offerable here.
+  const modelConfigs = useMemo(
+    () => allModelConfigs.filter((config) => config.variant === 'qwen3_vl_8b'),
+    [allModelConfigs]
+  );
 
   const _onChange = useCallback(
     (model: Qwen3VLEncoderModelConfig | null) => {
