@@ -551,6 +551,37 @@ export const isWanGGUFLowNoiseMainModelConfig = (config: AnyModelConfig): config
   );
 };
 
+export const isIdeogram4DiffusersMainModelConfig = (config: AnyModelConfig): config is MainModelConfig => {
+  return config.type === 'main' && config.base === 'ideogram-4' && config.format === 'diffusers';
+};
+
+/** Ideogram 4 GGUF main models, split by CFG branch.
+ *
+ *  Ideogram 4 runs both branches on every step, and they are separately trained weights, so a
+ *  usable model is two GGUF files. The branch is recorded on the config at install time — the
+ *  GGUFs carry no metadata and are otherwise identical, so it comes from the filename.
+ *
+ *  Filtering the pickers on it is what makes a wrong pairing unselectable: two conditional halves
+ *  would not crash, they would just render with no effective guidance. `isIdeogram4GGUFConditional`
+ *  also keeps unconditional halves out of the primary main-model dropdown. */
+export const isIdeogram4GGUFConditionalMainModelConfig = (config: AnyModelConfig): config is MainModelConfig => {
+  return (
+    config.type === 'main' &&
+    config.base === 'ideogram-4' &&
+    config.format === 'gguf_quantized' &&
+    config.branch === 'conditional'
+  );
+};
+
+export const isIdeogram4GGUFUnconditionalMainModelConfig = (config: AnyModelConfig): config is MainModelConfig => {
+  return (
+    config.type === 'main' &&
+    config.base === 'ideogram-4' &&
+    config.format === 'gguf_quantized' &&
+    config.branch === 'unconditional'
+  );
+};
+
 export const isWanLoRAModelConfig = (config: AnyModelConfig): config is WanLoRAModelConfig => {
   return config.type === 'lora' && config.base === 'wan';
 };

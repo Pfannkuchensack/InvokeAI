@@ -382,6 +382,33 @@ const slice = createSlice({
       }
       state.kleinQwen3EncoderModel = result.data;
     },
+    ideogram4UnconditionalTransformerModelSelected: (
+      state,
+      action: PayloadAction<{ key: string; name: string; base: string } | null>
+    ) => {
+      const result = zParamsState.shape.ideogram4UnconditionalTransformerModel.safeParse(action.payload);
+      if (!result.success) {
+        return;
+      }
+      state.ideogram4UnconditionalTransformerModel = result.data;
+    },
+    ideogram4VaeModelSelected: (state, action: PayloadAction<ParameterVAEModel | null>) => {
+      const result = zParamsState.shape.ideogram4VaeModel.safeParse(action.payload);
+      if (!result.success) {
+        return;
+      }
+      state.ideogram4VaeModel = result.data;
+    },
+    ideogram4Qwen3EncoderModelSelected: (
+      state,
+      action: PayloadAction<{ key: string; name: string; base: string } | null>
+    ) => {
+      const result = zParamsState.shape.ideogram4Qwen3EncoderModel.safeParse(action.payload);
+      if (!result.success) {
+        return;
+      }
+      state.ideogram4Qwen3EncoderModel = result.data;
+    },
     pidModeChanged: (state, action: PayloadAction<PidMode>) => {
       const prevPidScale = getPidScale(state.pidMode);
       const nextPidScale = getPidScale(action.payload);
@@ -819,6 +846,9 @@ const resetState = (state: ParamsState): ParamsState => {
   newState.animaLLLiteModel = oldState.animaLLLiteModel;
   newState.kleinVaeModel = oldState.kleinVaeModel;
   newState.kleinQwen3EncoderModel = oldState.kleinQwen3EncoderModel;
+  newState.ideogram4UnconditionalTransformerModel = oldState.ideogram4UnconditionalTransformerModel;
+  newState.ideogram4VaeModel = oldState.ideogram4VaeModel;
+  newState.ideogram4Qwen3EncoderModel = oldState.ideogram4Qwen3EncoderModel;
   newState.pidMode = oldState.pidMode;
   newState.pidDecoderModel = oldState.pidDecoderModel;
   newState.gemma2EncoderModel = oldState.gemma2EncoderModel;
@@ -900,6 +930,9 @@ export const {
   krea2Qwen3VlEncoderModelSelected,
   kleinVaeModelSelected,
   kleinQwen3EncoderModelSelected,
+  ideogram4UnconditionalTransformerModelSelected,
+  ideogram4VaeModelSelected,
+  ideogram4Qwen3EncoderModelSelected,
   pidModeChanged,
   pidDecoderModelSelected,
   gemma2EncoderModelSelected,
@@ -1072,6 +1105,11 @@ export const selectAnimaLLLiteModel = createParamsSelector((params) => params.an
 export const selectAnimaLLLiteWeight = createParamsSelector((params) => params.animaLLLiteWeight);
 export const selectKleinVaeModel = createParamsSelector((params) => params.kleinVaeModel);
 export const selectKleinQwen3EncoderModel = createParamsSelector((params) => params.kleinQwen3EncoderModel);
+export const selectIdeogram4UnconditionalTransformerModel = createParamsSelector(
+  (params) => params.ideogram4UnconditionalTransformerModel
+);
+export const selectIdeogram4VaeModel = createParamsSelector((params) => params.ideogram4VaeModel);
+export const selectIdeogram4Qwen3EncoderModel = createParamsSelector((params) => params.ideogram4Qwen3EncoderModel);
 export const selectPidMode = createParamsSelector((params) => params.pidMode);
 export const selectPidDecoderModel = createParamsSelector((params) => params.pidDecoderModel);
 export const selectPidSteps = createParamsSelector((params) => params.pidSteps);

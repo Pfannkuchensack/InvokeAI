@@ -81,6 +81,7 @@ const buildGenerateTabArg = (overrides: {
   kleinQwen3EncoderModel?: unknown;
   hasFlux2DiffusersVaeSource?: boolean;
   hasFlux2DiffusersQwen3Source?: boolean;
+  hasIdeogram4DiffusersSource?: boolean;
 }) => ({
   isConnected: true,
   model: overrides.model ?? flux2DiffusersModel,
@@ -94,6 +95,7 @@ const buildGenerateTabArg = (overrides: {
   dynamicPrompts: baseDynamicPrompts,
   hasFlux2DiffusersVaeSource: overrides.hasFlux2DiffusersVaeSource ?? false,
   hasFlux2DiffusersQwen3Source: overrides.hasFlux2DiffusersQwen3Source ?? false,
+  hasIdeogram4DiffusersSource: overrides.hasIdeogram4DiffusersSource ?? false,
 });
 
 const buildCanvasTabArg = (overrides: {
@@ -102,6 +104,7 @@ const buildCanvasTabArg = (overrides: {
   kleinQwen3EncoderModel?: unknown;
   hasFlux2DiffusersVaeSource?: boolean;
   hasFlux2DiffusersQwen3Source?: boolean;
+  hasIdeogram4DiffusersSource?: boolean;
 }) => ({
   isConnected: true,
   model: overrides.model ?? flux2DiffusersModel,
@@ -131,6 +134,7 @@ const buildCanvasTabArg = (overrides: {
   canvasIsSelectingObject: false,
   hasFlux2DiffusersVaeSource: overrides.hasFlux2DiffusersVaeSource ?? false,
   hasFlux2DiffusersQwen3Source: overrides.hasFlux2DiffusersQwen3Source ?? false,
+  hasIdeogram4DiffusersSource: overrides.hasIdeogram4DiffusersSource ?? false,
 });
 
 const hasFlux2VaeReason = (reasons: { content: string }[]) =>

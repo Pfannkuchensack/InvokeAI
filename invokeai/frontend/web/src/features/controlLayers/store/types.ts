@@ -900,6 +900,14 @@ export const zParamsState = z.object({
   // Flux2 Klein model components - uses Qwen3 instead of CLIP+T5
   kleinVaeModel: zParameterVAEModel.nullable(), // Optional: Separate FLUX.2 VAE for Klein
   kleinQwen3EncoderModel: zModelIdentifierField.nullable(), // Optional: Separate Qwen3 Encoder for Klein
+  // Ideogram 4 model components. A GGUF main model is only the conditional CFG branch, so the
+  // unconditional half must be selected explicitly — it is not inferred, because picking the wrong
+  // one (e.g. a q4_0 unconditional against a q5_0 conditional) would render without complaint.
+  // VAE and encoder follow the Klein pattern: optional, otherwise taken from an installed
+  // Diffusers Ideogram 4 model.
+  ideogram4UnconditionalTransformerModel: zModelIdentifierField.nullable(),
+  ideogram4VaeModel: zParameterVAEModel.nullable(), // Optional: Ideogram 4 uses the FLUX.2 VAE
+  ideogram4Qwen3EncoderModel: zModelIdentifierField.nullable(), // Optional: standalone Qwen3-VL encoder
   // PiD (Pixel Diffusion Decoder) - optional 4x super-resolution decode replacing the VAE decode.
   // - 'off':    regular VAE decode
   // - 'fit':    PiD decodes 4x internally, then downscales back to the bbox (compositing-safe; works in canvas/inpaint)
@@ -1025,6 +1033,9 @@ export const getInitialParamsState = (): ParamsState => ({
   animaLLLiteWeight: 1,
   kleinVaeModel: null,
   kleinQwen3EncoderModel: null,
+  ideogram4UnconditionalTransformerModel: null,
+  ideogram4VaeModel: null,
+  ideogram4Qwen3EncoderModel: null,
   pidMode: 'off',
   pidDecoderModel: null,
   gemma2EncoderModel: null,

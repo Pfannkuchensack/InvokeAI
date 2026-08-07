@@ -18,9 +18,9 @@ export const MainModelPicker = memo(() => {
   const dispatch = useAppDispatch();
   const activeTab = useAppSelector(selectActiveTab);
   const [allModelConfigs] = useMainModels();
-  // Low-noise Wan GGUFs belong in the Transformer (Low Noise) slot of the
-  // Wan advanced section, not as a primary main. Filter them out of the main
-  // model dropdown so users can't accidentally wire them backwards.
+  // Some GGUF models are only one half of a pair and belong in a dedicated slot in the advanced
+  // section, not as a primary main: Wan's low-noise expert, and Ideogram 4's unconditional CFG
+  // branch. Filter them out here so they can't be wired backwards.
   const modelConfigs = useMemo(
     () =>
       allModelConfigs.filter((c) => {
@@ -30,6 +30,15 @@ export const MainModelPicker = memo(() => {
           c.format === 'gguf_quantized' &&
           'expert' in c &&
           c.expert === 'low'
+        ) {
+          return false;
+        }
+        if (
+          c.type === 'main' &&
+          c.base === 'ideogram-4' &&
+          c.format === 'gguf_quantized' &&
+          'branch' in c &&
+          c.branch === 'unconditional'
         ) {
           return false;
         }

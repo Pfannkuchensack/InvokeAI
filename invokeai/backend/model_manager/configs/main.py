@@ -1428,6 +1428,85 @@ class Main_Diffusers_Ideogram4_Config(Diffusers_Config_Base, Main_Config_Base, C
         )
 
 
+def _has_ideogram4_keys(state_dict: dict[str | int, Any]) -> bool:
+    """Check if the state dict contains Ideogram 4 transformer keys.
+
+    ``embed_image_indicator`` (the per-token role embedding) and ``llm_cond_proj`` (the
+    Qwen3-VL conditioning projection) are unique to Ideogram 4 — they don't collide with
+    FLUX (``double_blocks``/``single_blocks``), Qwen Image (``txt_in``/``img_in``), Z-Image
+    (``cap_embedder``), Wan (``patch_embedding``) or Anima (``llm_adapter``).
+
+    Both are required: ``llm_cond_proj`` alone is close enough to other LLM-conditioned DiTs
+    to be worth pairing with a second fingerprint.
+
+    Tolerates the ComfyUI ``model.diffusion_model.`` / ``diffusion_model.`` prefixes.
+    """
+    prefixes = ("", "model.diffusion_model.", "diffusion_model.")
+    keys = state_dict.keys()
+    return all(
+        any((prefix + needle) in keys for prefix in prefixes)
+        for needle in ("embed_image_indicator.weight", "llm_cond_proj.weight")
+    )
+
+
+def _detect_ideogram4_gguf_branch(filename: str) -> Literal["conditional", "unconditional"]:
+    """Filename heuristic for Ideogram 4's dual-branch CFG.
+
+    A complete Ideogram 4 model is two GGUF files — the conditional and the unconditional
+    transformer — that the model loader invocation pairs. The files are byte-for-byte the
+    same size and carry identical tensor names, shapes and quantization types, and the
+    GGUFs ship with no metadata at all (``kv_count == 0``), so the **filename is the only
+    available signal**. Upstream names them
+    ``ideogram4-transformer-*.gguf`` / ``ideogram4-unconditional_transformer-*.gguf``.
+
+    Defaults to 'conditional' when no marker is present, matching upstream's naming where
+    only the unconditional branch is tagged.
+    """
+    name = filename.lower()
+    if any(marker in name for marker in ("unconditional", "uncond", "negative")):
+        return "unconditional"
+    return "conditional"
+
+
+class Main_GGUF_Ideogram4_Config(Checkpoint_Config_Base, Main_Config_Base, Config_Base):
+    """Model config for GGUF-quantized Ideogram 4 transformer models.
+
+    Ideogram 4 runs dual-branch CFG, so a usable model is **two** single-file GGUFs. Each
+    file is installed as its own model record; ``branch`` records which one this is so the
+    model loader invocation can pair them — mirroring how Wan 2.2 A14B handles its
+    dual-expert MoE.
+
+    Only the transformer comes from GGUF. The Qwen3-VL text encoder and the VAE are supplied
+    separately (the VAE is bit-identical to the FLUX.2 VAE).
+    """
+
+    base: Literal[BaseModelType.Ideogram4] = Field(default=BaseModelType.Ideogram4)
+    format: Literal[ModelFormat.GGUFQuantized] = Field(default=ModelFormat.GGUFQuantized)
+    branch: Literal["conditional", "unconditional"] = Field(
+        default="conditional",
+        description="Which CFG branch this transformer is: 'conditional' for the prompt-guided "
+        "branch, 'unconditional' for the branch used as the negative side of CFG.",
+    )
+
+    @classmethod
+    def from_model_on_disk(cls, mod: ModelOnDisk, override_fields: dict[str, Any]) -> Self:
+        raise_if_not_file(mod)
+
+        raise_for_override_fields(cls, override_fields)
+
+        sd = mod.load_state_dict()
+
+        if not _has_ggml_tensors(sd):
+            raise NotAMatchError("state dict does not look like GGUF quantized")
+
+        if not _has_ideogram4_keys(sd):
+            raise NotAMatchError("state dict does not look like an Ideogram 4 transformer")
+
+        branch = override_fields.pop("branch", None) or _detect_ideogram4_gguf_branch(mod.path.stem)
+
+        return cls(**override_fields, branch=branch)
+
+
 class Main_Diffusers_Krea2_Config(Diffusers_Config_Base, Main_Config_Base, Config_Base):
     """Model config for Krea-2 diffusers models (Krea-2-Turbo)."""
 

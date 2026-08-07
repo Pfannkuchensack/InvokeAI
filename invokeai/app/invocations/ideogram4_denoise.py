@@ -1,3 +1,4 @@
+from contextlib import ExitStack
 from typing import Literal, Optional
 
 import torch
@@ -9,7 +10,7 @@ from invokeai.app.invocations.fields import (
     Input,
     InputField,
 )
-from invokeai.app.invocations.model import TransformerField
+from invokeai.app.invocations.model import Ideogram4TransformerField
 from invokeai.app.invocations.primitives import LatentsOutput
 from invokeai.app.services.shared.invocation_context import InvocationContext
 from invokeai.app.util.step_callback import (
@@ -19,6 +20,7 @@ from invokeai.app.util.step_callback import (
 )
 from invokeai.backend.ideogram4 import run_ideogram4_denoise
 from invokeai.backend.ideogram4.latent_norm import get_latent_norm
+from invokeai.backend.ideogram4.modeling_ideogram4 import Ideogram4Transformer
 from invokeai.backend.ideogram4.sampler_configs import PRESETS
 from invokeai.backend.ideogram4.sampling_utils import unpatchify_and_denormalize
 from invokeai.backend.ideogram4.transformer_pair import Ideogram4TransformerPair
@@ -61,13 +63,13 @@ def _effective_guidance_schedule(
     title="Denoise - Ideogram 4",
     tags=["image", "ideogram4"],
     category="latents",
-    version="1.0.0",
+    version="2.0.0",
     classification=Classification.Prototype,
 )
 class Ideogram4DenoiseInvocation(BaseInvocation):
     """Runs the Ideogram 4 dual-branch flow-matching denoising loop (text-to-image)."""
 
-    transformer: TransformerField = InputField(
+    transformer: Ideogram4TransformerField = InputField(
         description=FieldDescriptions.transformer, input=Input.Connection, title="Transformer"
     )
     positive_conditioning: Ideogram4ConditioningField = InputField(
@@ -156,12 +158,28 @@ class Ideogram4DenoiseInvocation(BaseInvocation):
             else:
                 context.util.signal_progress("Running Ideogram 4 denoising", step / total)
 
-        transformer_info = context.models.load(self.transformer.transformer)
-        with transformer_info.model_on_device() as (_, transformers):
-            assert isinstance(transformers, Ideogram4TransformerPair)
+        # Every denoise step runs both CFG branches, so they must be co-resident for the whole loop.
+        # Diffusers models hand back both at once as an Ideogram4TransformerPair; GGUF ships one
+        # branch per file, so the two records are held open together via the ExitStack.
+        with ExitStack() as exit_stack:
+            transformer_info = context.models.load(self.transformer.transformer)
+            (_, primary) = exit_stack.enter_context(transformer_info.model_on_device())
+
+            if self.transformer.unconditional_transformer is not None:
+                unconditional_info = context.models.load(self.transformer.unconditional_transformer)
+                (_, unconditional) = exit_stack.enter_context(unconditional_info.model_on_device())
+                assert isinstance(primary, Ideogram4Transformer)
+                assert isinstance(unconditional, Ideogram4Transformer)
+                conditional_transformer = primary
+                unconditional_transformer = unconditional
+            else:
+                assert isinstance(primary, Ideogram4TransformerPair)
+                conditional_transformer = primary.conditional
+                unconditional_transformer = primary.unconditional
+
             packed = run_ideogram4_denoise(
-                conditional_transformer=transformers.conditional,
-                unconditional_transformer=transformers.unconditional,
+                conditional_transformer=conditional_transformer,
+                unconditional_transformer=unconditional_transformer,
                 llm_features=llm_features,
                 height=self.height,
                 width=self.width,

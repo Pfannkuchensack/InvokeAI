@@ -144,6 +144,34 @@ class TransformerField(BaseModel):
     loras: List[LoRAField] = Field(description="LoRAs to apply on model loading")
 
 
+class Ideogram4TransformerField(BaseModel):
+    """Transformer field for Ideogram 4's dual-branch CFG.
+
+    Ideogram 4 runs two *separately trained* weight sets on every step: the conditional
+    transformer over the packed ``[text][image]`` sequence and the unconditional transformer
+    over image-only tokens with zeroed conditioning. Both are always required — this is not a
+    Mixture-of-Experts where one is active at a time, and the unconditional branch cannot be
+    substituted by running the conditional one with an empty prompt.
+
+    How the two branches are supplied depends on the format:
+
+    * **Diffusers** bundles both in one model folder, so ``transformer`` alone is populated and
+      resolves to an ``Ideogram4TransformerPair``.
+    * **GGUF** ships one file per branch, each installed as its own model record, so
+      ``unconditional_transformer`` carries the second half.
+    """
+
+    transformer: ModelIdentifierField = Field(
+        description="Conditional transformer. For Diffusers models this resolves to both branches at once."
+    )
+    unconditional_transformer: ModelIdentifierField | None = Field(
+        default=None,
+        description="Unconditional (negative) transformer. Required for GGUF, where each CFG branch is "
+        "a separate file; None for Diffusers, which bundles both branches in one model.",
+    )
+    loras: List[LoRAField] = Field(default_factory=list, description="LoRAs to apply on model loading")
+
+
 class WanTransformerField(BaseModel):
     """Transformer field for Wan 2.2 models.
 

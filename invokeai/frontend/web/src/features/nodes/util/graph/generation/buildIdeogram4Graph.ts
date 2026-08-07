@@ -4,12 +4,17 @@ import { getPrefixedId } from 'features/controlLayers/konva/util';
 import {
   selectIdeogram4GuidanceScale,
   selectIdeogram4Mu,
+  selectIdeogram4Qwen3EncoderModel,
   selectIdeogram4SamplerPreset,
   selectIdeogram4Steps,
+  selectIdeogram4UnconditionalTransformerModel,
+  selectIdeogram4VaeModel,
   selectMainModelConfig,
 } from 'features/controlLayers/store/paramsSlice';
 import { selectCanvasMetadata } from 'features/controlLayers/store/selectors';
 import { fetchModelConfigWithTypeGuard } from 'features/metadata/util/modelFetchingHelpers';
+import type { ModelIdentifierField } from 'features/nodes/types/common';
+import { zModelIdentifierField } from 'features/nodes/types/common';
 import { addNSFWChecker } from 'features/nodes/util/graph/generation/addNSFWChecker';
 import { addWatermarker } from 'features/nodes/util/graph/generation/addWatermarker';
 import { collectIdeogram4PromptInputs } from 'features/nodes/util/graph/generation/buildIdeogram4Prompt';
@@ -20,6 +25,7 @@ import {
 } from 'features/nodes/util/graph/graphBuilderUtils';
 import type { GraphBuilderArg, GraphBuilderReturn, ImageOutputNodes } from 'features/nodes/util/graph/types';
 import { selectActiveTab } from 'features/ui/store/uiSelectors';
+import { selectIdeogram4DiffusersModels } from 'services/api/hooks/modelsByType';
 import type { Invocation } from 'services/api/types';
 import { isNonRefinerMainModelConfig } from 'services/api/types';
 import { assert } from 'tsafe';
@@ -56,10 +62,38 @@ export const buildIdeogram4Graph = async (arg: GraphBuilderArg): Promise<GraphBu
 
   const g = new Graph(getPrefixedId('ideogram4_graph'));
 
+  // A GGUF main model is only the conditional CFG branch and ships no encoder or VAE. The
+  // unconditional half is always picked explicitly (guessing which one pairs with which quant level
+  // would silently mismatch), while the encoder and VAE fall back to an installed Diffusers
+  // Ideogram 4 model, mirroring how FLUX.2 Klein resolves its components.
+  const isGGUF = model.format === 'gguf_quantized';
+  const unconditionalTransformerModel = selectIdeogram4UnconditionalTransformerModel(state);
+  const ideogram4VaeModel = selectIdeogram4VaeModel(state);
+  const ideogram4Qwen3EncoderModel = selectIdeogram4Qwen3EncoderModel(state);
+
+  let sourceModel: ModelIdentifierField | undefined;
+  if (isGGUF && (!ideogram4VaeModel || !ideogram4Qwen3EncoderModel)) {
+    const diffusersModel = selectIdeogram4DiffusersModels(state)[0];
+    if (diffusersModel) {
+      sourceModel = zModelIdentifierField.parse(diffusersModel);
+    }
+  }
+
+  if (isGGUF) {
+    assert(
+      unconditionalTransformerModel,
+      'Ideogram 4 GGUF models need the matching unconditional transformer to be selected'
+    );
+  }
+
   const modelLoader = g.addNode({
     type: 'ideogram4_model_loader',
     id: getPrefixedId('ideogram4_model_loader'),
     model,
+    unconditional_transformer_model: (isGGUF ? unconditionalTransformerModel : null) ?? undefined,
+    vae_model: ideogram4VaeModel ?? undefined,
+    qwen3_encoder_model: ideogram4Qwen3EncoderModel ?? undefined,
+    source_model: sourceModel,
   });
 
   // The global prompt lives in its own node so the linear batch (dynamic prompts / prompt batching)

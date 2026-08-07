@@ -95,6 +95,7 @@ from invokeai.backend.model_manager.configs.main import (
     Main_Diffusers_ZImage_Config,
     Main_GGUF_Flux2_Config,
     Main_GGUF_FLUX_Config,
+    Main_GGUF_Ideogram4_Config,
     Main_GGUF_Krea2_Config,
     Main_GGUF_QwenImage_Config,
     Main_GGUF_Wan_Config,
@@ -285,6 +286,7 @@ AnyModelConfig = Annotated[
         Annotated[Main_GGUF_Wan_Config, Main_GGUF_Wan_Config.get_tag()],
         Annotated[Main_GGUF_ZImage_Config, Main_GGUF_ZImage_Config.get_tag()],
         Annotated[Main_GGUF_Krea2_Config, Main_GGUF_Krea2_Config.get_tag()],
+        Annotated[Main_GGUF_Ideogram4_Config, Main_GGUF_Ideogram4_Config.get_tag()],
         # VAE - checkpoint format
         Annotated[VAE_Checkpoint_SD1_Config, VAE_Checkpoint_SD1_Config.get_tag()],
         Annotated[VAE_Checkpoint_SD2_Config, VAE_Checkpoint_SD2_Config.get_tag()],

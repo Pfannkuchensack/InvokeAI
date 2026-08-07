@@ -44,7 +44,7 @@ import type { TabName } from 'features/ui/store/uiTypes';
 import i18n from 'i18next';
 import { atom, computed } from 'nanostores';
 import { useEffect } from 'react';
-import { selectFlux2DiffusersModels } from 'services/api/hooks/modelsByType';
+import { selectFlux2DiffusersModels, selectIdeogram4DiffusersModels } from 'services/api/hooks/modelsByType';
 import type { MainOrExternalModelConfig } from 'services/api/types';
 import { isExternalApiModelConfig } from 'services/api/types';
 import { $isConnected } from 'services/events/stores';
@@ -121,6 +121,8 @@ const debouncedUpdateReasons = debounce(async (arg: UpdateReasonsArg) => {
     const hasFlux2DiffusersQwen3Source = flux2DiffusersModels.some(
       (m) => 'variant' in m && isFlux2KleinQwen3Compatible(m.variant, modelVariant)
     );
+    // Ideogram 4 has no variants, so any installed Diffusers model can supply the encoder and VAE.
+    const hasIdeogram4DiffusersSource = selectIdeogram4DiffusersModels(store.getState()).length > 0;
     const reasons = await getReasonsWhyCannotEnqueueGenerateTab({
       isConnected,
       model,
@@ -130,6 +132,7 @@ const debouncedUpdateReasons = debounce(async (arg: UpdateReasonsArg) => {
       loras,
       hasFlux2DiffusersVaeSource,
       hasFlux2DiffusersQwen3Source,
+      hasIdeogram4DiffusersSource,
     });
     $reasonsWhyCannotEnqueue.set(reasons);
   } else if (tab === 'canvas') {
@@ -140,6 +143,8 @@ const debouncedUpdateReasons = debounce(async (arg: UpdateReasonsArg) => {
     const hasFlux2DiffusersQwen3Source = flux2DiffusersModels.some(
       (m) => 'variant' in m && isFlux2KleinQwen3Compatible(m.variant, modelVariant)
     );
+    // Ideogram 4 has no variants, so any installed Diffusers model can supply the encoder and VAE.
+    const hasIdeogram4DiffusersSource = selectIdeogram4DiffusersModels(store.getState()).length > 0;
     const reasons = await getReasonsWhyCannotEnqueueCanvasTab({
       isConnected,
       model,
@@ -155,6 +160,7 @@ const debouncedUpdateReasons = debounce(async (arg: UpdateReasonsArg) => {
       loras,
       hasFlux2DiffusersVaeSource,
       hasFlux2DiffusersQwen3Source,
+      hasIdeogram4DiffusersSource,
     });
     $reasonsWhyCannotEnqueue.set(reasons);
   } else if (tab === 'workflows') {
@@ -251,6 +257,7 @@ export const getReasonsWhyCannotEnqueueGenerateTab = (arg: {
   dynamicPrompts: DynamicPromptsState;
   hasFlux2DiffusersVaeSource: boolean;
   hasFlux2DiffusersQwen3Source: boolean;
+  hasIdeogram4DiffusersSource: boolean;
 }) => {
   const {
     isConnected,
@@ -261,6 +268,7 @@ export const getReasonsWhyCannotEnqueueGenerateTab = (arg: {
     dynamicPrompts,
     hasFlux2DiffusersVaeSource,
     hasFlux2DiffusersQwen3Source,
+    hasIdeogram4DiffusersSource,
   } = arg;
   const { positivePrompt } = params;
   const reasons: Reason[] = [];
@@ -310,6 +318,22 @@ export const getReasonsWhyCannotEnqueueGenerateTab = (arg: {
     }
     if (!params.kleinQwen3EncoderModel && !hasFlux2DiffusersQwen3Source) {
       reasons.push({ content: i18n.t('parameters.invoke.noFlux2KleinQwen3EncoderModelSelected') });
+    }
+  }
+
+  if (model?.base === 'ideogram-4' && model.format === 'gguf_quantized') {
+    // A GGUF Ideogram 4 model is one CFG branch and ships no encoder or VAE. Both branches run on
+    // every step, so the unconditional half is mandatory; it is never inferred, because pairing it
+    // with a mismatched quant level would render without any error. The encoder and VAE may instead
+    // come from an installed Diffusers Ideogram 4 model.
+    if (!params.ideogram4UnconditionalTransformerModel) {
+      reasons.push({ content: i18n.t('parameters.invoke.noIdeogram4UnconditionalTransformerSelected') });
+    }
+    if (!params.ideogram4VaeModel && !hasIdeogram4DiffusersSource) {
+      reasons.push({ content: i18n.t('parameters.invoke.noIdeogram4VaeModelSelected') });
+    }
+    if (!params.ideogram4Qwen3EncoderModel && !hasIdeogram4DiffusersSource) {
+      reasons.push({ content: i18n.t('parameters.invoke.noIdeogram4Qwen3EncoderModelSelected') });
     }
   }
 
@@ -605,6 +629,7 @@ export const getReasonsWhyCannotEnqueueCanvasTab = (arg: {
   canvasIsSelectingObject: boolean;
   hasFlux2DiffusersVaeSource: boolean;
   hasFlux2DiffusersQwen3Source: boolean;
+  hasIdeogram4DiffusersSource: boolean;
 }) => {
   const {
     isConnected,
@@ -621,6 +646,7 @@ export const getReasonsWhyCannotEnqueueCanvasTab = (arg: {
     canvasIsSelectingObject,
     hasFlux2DiffusersVaeSource,
     hasFlux2DiffusersQwen3Source,
+    hasIdeogram4DiffusersSource,
   } = arg;
   const { positivePrompt } = params;
   const reasons: Reason[] = [];
@@ -739,6 +765,19 @@ export const getReasonsWhyCannotEnqueueCanvasTab = (arg: {
       if (!params.kleinQwen3EncoderModel && !hasFlux2DiffusersQwen3Source) {
         reasons.push({ content: i18n.t('parameters.invoke.noFlux2KleinQwen3EncoderModelSelected') });
       }
+    }
+  }
+
+  if (model?.base === 'ideogram-4' && model.format === 'gguf_quantized') {
+    // See the generate-tab branch: a GGUF Ideogram 4 model is one CFG branch and ships no components.
+    if (!params.ideogram4UnconditionalTransformerModel) {
+      reasons.push({ content: i18n.t('parameters.invoke.noIdeogram4UnconditionalTransformerSelected') });
+    }
+    if (!params.ideogram4VaeModel && !hasIdeogram4DiffusersSource) {
+      reasons.push({ content: i18n.t('parameters.invoke.noIdeogram4VaeModelSelected') });
+    }
+    if (!params.ideogram4Qwen3EncoderModel && !hasIdeogram4DiffusersSource) {
+      reasons.push({ content: i18n.t('parameters.invoke.noIdeogram4Qwen3EncoderModelSelected') });
     }
 
     const { bbox } = canvas;

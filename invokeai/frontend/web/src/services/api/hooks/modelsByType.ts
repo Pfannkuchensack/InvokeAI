@@ -25,6 +25,8 @@ import {
   isFluxReduxModelConfig,
   isFluxVAEModelConfig,
   isGemma2EncoderModelConfig,
+  isIdeogram4DiffusersMainModelConfig,
+  isIdeogram4GGUFUnconditionalMainModelConfig,
   isIPAdapterModelConfig,
   isLLaVAModelConfig,
   isLoRAModelConfig,
@@ -116,6 +118,8 @@ export const useAnimaQwen3EncoderModels = () => buildModelsHook(isAnimaQwen3Enco
 export const useAnimaInpaintControlNetModels = () => buildModelsHook(isAnimaInpaintControlNetModelConfig)();
 export const useZImageDiffusersModels = () => buildModelsHook(isZImageDiffusersMainModelConfig)();
 export const useFlux2DiffusersModels = () => buildModelsHook(isFlux2DiffusersMainModelConfig)();
+export const useIdeogram4DiffusersModels = () => buildModelsHook(isIdeogram4DiffusersMainModelConfig)();
+export const useIdeogram4GGUFUnconditionalModels = () => buildModelsHook(isIdeogram4GGUFUnconditionalMainModelConfig)();
 export const useQwenImageDiffusersModels = () => buildModelsHook(isQwenImageDiffusersMainModelConfig)();
 export const useQwenImageVAEModels = () => buildModelsHook(isQwenImageVAEModelConfig)();
 export const useQwenVLEncoderModels = () => buildModelsHook(isQwenVLEncoderModelConfig)();
@@ -167,6 +171,7 @@ export const selectQwenImageVAEModels = buildModelsSelector(isQwenImageVAEModelC
 export const selectQwenVLEncoderModels = buildModelsSelector(isQwenVLEncoderModelConfig);
 export const selectZImageDiffusersModels = buildModelsSelector(isZImageDiffusersMainModelConfig);
 export const selectFlux2DiffusersModels = buildModelsSelector(isFlux2DiffusersMainModelConfig);
+export const selectIdeogram4DiffusersModels = buildModelsSelector(isIdeogram4DiffusersMainModelConfig);
 export const selectFluxVAEModels = buildModelsSelector(isFluxVAEModelConfig);
 export const selectAnimaVAEModels = buildModelsSelector(isAnimaVAEModelConfig);
 export const selectQwen3VLEncoderModels = buildModelsSelector(isQwen3VLEncoderModelConfig);

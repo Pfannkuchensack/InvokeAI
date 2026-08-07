@@ -15,6 +15,7 @@ import {
   selectIsSD3,
   selectIsWan,
   selectIsZImage,
+  selectMainModelConfig,
   selectParamsSlice,
   selectVAEKey,
 } from 'features/controlLayers/store/paramsSlice';
@@ -32,6 +33,7 @@ import {
   ParamHiDiffusionToggle,
   ParamHiDiffusionWindowAttnToggle,
 } from 'features/parameters/components/Advanced/ParamHiDiffusionToggle';
+import ParamIdeogram4ModelSelect from 'features/parameters/components/Advanced/ParamIdeogram4ModelSelect';
 import ParamKrea2ModelSelects from 'features/parameters/components/Advanced/ParamKrea2ModelSelects';
 import ParamQwenImageComponentSourceSelect from 'features/parameters/components/Advanced/ParamQwenImageComponentSourceSelect';
 import ParamQwenImageQuantization from 'features/parameters/components/Advanced/ParamQwenImageQuantization';
@@ -70,6 +72,10 @@ export const AdvancedSettingsAccordion = memo(() => {
   const isSD3 = useAppSelector(selectIsSD3);
   const isZImage = useAppSelector(selectIsZImage);
   const isIdeogram4 = useAppSelector(selectIsIdeogram4);
+  // GGUF Ideogram 4 models are a single CFG branch and ship no encoder/VAE, so they need the
+  // component pickers; the Diffusers build bundles everything and doesn't.
+  const mainModelConfig = useAppSelector(selectMainModelConfig);
+  const isIdeogram4GGUF = mainModelConfig?.base === 'ideogram-4' && mainModelConfig.format === 'gguf_quantized';
   const isExternal = useAppSelector(selectIsExternal);
   const isQwenImage = useAppSelector(selectIsQwenImage);
   const isAnima = useAppSelector(selectIsAnima);
@@ -230,6 +236,11 @@ export const AdvancedSettingsAccordion = memo(() => {
               <ParamIdeogram4GuidanceScale />
               <ParamIdeogram4Mu />
             </FormControlGroup>
+            {isIdeogram4GGUF && (
+              <FormControlGroup>
+                <ParamIdeogram4ModelSelect />
+              </FormControlGroup>
+            )}
             <ParamIdeogram4ColorPalette />
           </>
         )}

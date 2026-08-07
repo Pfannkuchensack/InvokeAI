@@ -21,7 +21,7 @@ import torch
 from safetensors.torch import load_file
 
 from invokeai.backend.model_manager.configs.factory import AnyModelConfig
-from invokeai.backend.model_manager.configs.main import Main_Diffusers_Ideogram4_Config
+from invokeai.backend.model_manager.configs.main import Main_Diffusers_Ideogram4_Config, Main_GGUF_Ideogram4_Config
 from invokeai.backend.model_manager.load.load_default import ModelLoader
 from invokeai.backend.model_manager.load.model_loader_registry import ModelLoaderRegistry
 from invokeai.backend.model_manager.taxonomy import (
@@ -31,6 +31,7 @@ from invokeai.backend.model_manager.taxonomy import (
     ModelType,
     SubModelType,
 )
+from invokeai.backend.quantization.gguf.loaders import gguf_sd_loader
 from invokeai.backend.util.devices import TorchDevice
 
 
@@ -228,3 +229,57 @@ class Ideogram4DiffusersModel(ModelLoader):
         ae.load_state_dict(sd)
         ae.eval()
         return ae.to(model_dtype)
+
+
+@ModelLoaderRegistry.register(base=BaseModelType.Ideogram4, type=ModelType.Main, format=ModelFormat.GGUFQuantized)
+class Ideogram4GGUFModel(ModelLoader):
+    """Loads a single GGUF-quantized Ideogram 4 transformer branch.
+
+    Unlike the Diffusers loader, this yields **one** ``Ideogram4Transformer``, not a pair:
+    each GGUF file is its own model record (see ``Main_GGUF_Ideogram4_Config.branch``), and
+    the model loader invocation pairs the conditional and unconditional branches.
+
+    The GGUF tensor names are identical to ``Ideogram4Transformer``'s state dict — upstream
+    converted from the fp8 release, which uses the same namespace — so no key remapping is
+    needed. Weights stay quantized as ``GGMLTensor``; the model cache applies the custom
+    autocast layers that dequantize on the fly.
+    """
+
+    def _load_model(
+        self,
+        config: AnyModelConfig,
+        submodel_type: Optional[SubModelType] = None,
+    ) -> AnyModel:
+        if not isinstance(config, Main_GGUF_Ideogram4_Config):
+            raise ValueError(f"Expected Main_GGUF_Ideogram4_Config, got {type(config).__name__}.")
+
+        if submodel_type is not SubModelType.Transformer:
+            raise ValueError(
+                "Only the Transformer submodel is available from an Ideogram 4 GGUF. Received: "
+                f"{submodel_type.value if submodel_type else 'None'}. The Qwen3-VL encoder and VAE "
+                "must be supplied separately."
+            )
+
+        from invokeai.backend.ideogram4.modeling_ideogram4 import Ideogram4Config, Ideogram4Transformer
+
+        target_device = TorchDevice.choose_torch_device()
+        compute_dtype = TorchDevice.choose_bfloat16_safe_dtype(target_device)
+
+        sd = gguf_sd_loader(Path(config.path), compute_dtype=compute_dtype)
+
+        # Tolerate the ComfyUI-style prefixes the config's fingerprint also accepts.
+        prefix = next(
+            (p for p in ("model.diffusion_model.", "diffusion_model.") if any(k.startswith(p) for k in sd)),
+            None,
+        )
+        if prefix:
+            sd = {(k[len(prefix) :] if k.startswith(prefix) else k): v for k, v in sd.items()}
+
+        with accelerate.init_empty_weights():
+            model = Ideogram4Transformer(Ideogram4Config())
+
+        # strict=True is deliberate: the namespace matches exactly, so a mismatch means a
+        # bad or mislabelled file and should fail here rather than as a meta tensor later.
+        model.load_state_dict(sd, strict=True, assign=True)
+        model.eval()
+        return model

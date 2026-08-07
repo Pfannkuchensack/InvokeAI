@@ -9,7 +9,26 @@ vi.mock('features/controlLayers/konva/util', () => ({
   getPrefixedId: (prefix: string) => `${prefix}:${nextId++}`,
 }));
 
-const model = { key: 'ideogram4-model', hash: 'ideogram4-hash', name: 'Ideogram 4', base: 'ideogram-4', type: 'main' };
+const diffusersModel = {
+  key: 'ideogram4-model',
+  hash: 'ideogram4-hash',
+  name: 'Ideogram 4',
+  base: 'ideogram-4',
+  type: 'main',
+  format: 'diffusers',
+};
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let model: any = diffusersModel;
+
+// GGUF component selections. A GGUF main model is only the conditional CFG branch, so these decide
+// where the second branch, the encoder and the VAE come from.
+/* eslint-disable @typescript-eslint/no-explicit-any */
+let unconditionalTransformerModel: any = null;
+let ideogram4VaeModel: any = null;
+let ideogram4Qwen3EncoderModel: any = null;
+let ideogram4DiffusersModels: any[] = [];
+/* eslint-enable @typescript-eslint/no-explicit-any */
 
 // Controlled prompt inputs — the structured case (regions + palette) is the one that used to be
 // clobbered by the decoy. globalPrompt is what the linear batch injects into.
@@ -25,6 +44,13 @@ vi.mock('features/controlLayers/store/paramsSlice', () => ({
   selectIdeogram4Steps: vi.fn(() => null),
   selectIdeogram4GuidanceScale: vi.fn(() => null),
   selectIdeogram4Mu: vi.fn(() => null),
+  selectIdeogram4UnconditionalTransformerModel: vi.fn(() => unconditionalTransformerModel),
+  selectIdeogram4VaeModel: vi.fn(() => ideogram4VaeModel),
+  selectIdeogram4Qwen3EncoderModel: vi.fn(() => ideogram4Qwen3EncoderModel),
+}));
+
+vi.mock('services/api/hooks/modelsByType', () => ({
+  selectIdeogram4DiffusersModels: vi.fn(() => ideogram4DiffusersModels),
 }));
 
 vi.mock('features/controlLayers/store/selectors', () => ({
@@ -79,6 +105,93 @@ describe('buildIdeogram4Graph', () => {
       regions: [{ prompt: 'a red bird', bbox: [10, 20, 300, 400] }],
       colorPalette: ['#FF0000'],
     };
+    model = diffusersModel;
+    unconditionalTransformerModel = null;
+    ideogram4VaeModel = null;
+    ideogram4Qwen3EncoderModel = null;
+    ideogram4DiffusersModels = [];
+  });
+
+  describe('GGUF component wiring', () => {
+    const ggufModel = { ...diffusersModel, key: 'ideogram4-gguf-cond', format: 'gguf_quantized' };
+    const uncondModel = {
+      key: 'ideogram4-gguf-uncond',
+      hash: 'uncond-hash',
+      name: 'Ideogram 4 (unconditional)',
+      base: 'ideogram-4',
+      type: 'main',
+      format: 'gguf_quantized',
+    };
+
+    const getLoader = (
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      g: any
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ) => g.getNodes().find((n: any) => n.type === 'ideogram4_model_loader');
+
+    it('leaves the component fields empty for a Diffusers model, which bundles everything', async () => {
+      const { g } = await buildIdeogram4Graph(buildArg());
+      const loader = getLoader(g);
+
+      expect(loader.model.key).toBe('ideogram4-model');
+      expect(loader.unconditional_transformer_model).toBeUndefined();
+      expect(loader.source_model).toBeUndefined();
+    });
+
+    it('wires the explicitly selected unconditional branch for a GGUF model', async () => {
+      model = ggufModel;
+      unconditionalTransformerModel = uncondModel;
+      ideogram4DiffusersModels = [diffusersModel];
+
+      const { g } = await buildIdeogram4Graph(buildArg());
+      const loader = getLoader(g);
+
+      expect(loader.model.key).toBe('ideogram4-gguf-cond');
+      expect(loader.unconditional_transformer_model.key).toBe('ideogram4-gguf-uncond');
+    });
+
+    it('falls back to an installed Diffusers model for the encoder and VAE', async () => {
+      model = ggufModel;
+      unconditionalTransformerModel = uncondModel;
+      ideogram4DiffusersModels = [diffusersModel];
+
+      const { g } = await buildIdeogram4Graph(buildArg());
+      const loader = getLoader(g);
+
+      expect(loader.source_model.key).toBe('ideogram4-model');
+      expect(loader.vae_model).toBeUndefined();
+      expect(loader.qwen3_encoder_model).toBeUndefined();
+    });
+
+    it('does not resolve a source model when both components are selected explicitly', async () => {
+      model = ggufModel;
+      unconditionalTransformerModel = uncondModel;
+      ideogram4VaeModel = { key: 'flux2-vae', hash: 'vae-hash', name: 'FLUX.2 VAE', base: 'flux2', type: 'vae' };
+      ideogram4Qwen3EncoderModel = {
+        key: 'qwen3vl',
+        hash: 'enc-hash',
+        name: 'Qwen3-VL',
+        base: 'any',
+        type: 'qwen3_vl_encoder',
+      };
+      ideogram4DiffusersModels = [diffusersModel];
+
+      const { g } = await buildIdeogram4Graph(buildArg());
+      const loader = getLoader(g);
+
+      expect(loader.source_model).toBeUndefined();
+      expect(loader.vae_model.key).toBe('flux2-vae');
+      expect(loader.qwen3_encoder_model.key).toBe('qwen3vl');
+    });
+
+    it('refuses to build a GGUF graph without the unconditional branch', async () => {
+      model = ggufModel;
+      ideogram4DiffusersModels = [diffusersModel];
+
+      // Both branches run on every step, so a missing half would render with no effective guidance
+      // rather than fail — hence the hard stop here.
+      await expect(buildIdeogram4Graph(buildArg())).rejects.toThrow(/unconditional transformer/i);
+    });
   });
 
   it('routes the batch-injectable prompt node through the caption builder into the text encoder', async () => {

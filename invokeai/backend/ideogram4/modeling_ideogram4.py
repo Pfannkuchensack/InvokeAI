@@ -41,6 +41,40 @@ class Ideogram4Config:
     norm_eps: float = 1e-5
 
 
+def _resolve_compute_dtype(module: nn.Module) -> torch.dtype:
+    """Resolve the dtype this module's math should run in.
+
+    A quantized weight's ``dtype`` is not the dtype to compute in:
+
+    - fp8 (``Fp8Linear``) stores e4m3 weights and exposes ``compute_dtype`` on the *module*.
+    - GGUF (``GGMLTensor``) keeps the packed bytes, so ``weight.dtype`` is ``uint8``; the real
+      compute dtype lives on the *tensor*.
+    - Unquantized weights report the right dtype directly.
+
+    Checked in that order so an explicit module-level override always wins.
+    """
+    dtype = getattr(module, "compute_dtype", None)
+    if dtype is None:
+        dtype = getattr(module.weight, "compute_dtype", None)
+    if dtype is None:
+        dtype = module.weight.dtype
+    return dtype
+
+
+def _dequantized(weight: torch.Tensor) -> torch.Tensor:
+    """Materialize a weight that torch must see at its true shape and dtype.
+
+    ``GGMLTensor`` only presents its dequantized shape through Python-level attribute
+    overrides. Ops that validate shapes in C++ before ``__torch_dispatch__`` runs — such as
+    ``F.rms_norm`` and ``F.embedding`` — see the packed buffer instead and fail. ``nn.Linear``
+    is unaffected because its ``addmm``/``t`` ops are intercepted by the dispatch table.
+
+    Only these few small weights (norms, the 2-row indicator embedding) take this path, so
+    dequantizing per forward is negligible; a no-op for unquantized weights.
+    """
+    return weight.get_dequantized_tensor() if hasattr(weight, "get_dequantized_tensor") else weight
+
+
 def _rotate_half(x: torch.Tensor) -> torch.Tensor:
     half = x.shape[-1] // 2
     x1 = x[..., :half]
@@ -107,7 +141,8 @@ class Ideogram4RMSNorm(nn.Module):
         self.eps = eps
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return F.rms_norm(x, self.weight.shape, self.weight, self.eps)
+        weight = _dequantized(self.weight)
+        return F.rms_norm(x, weight.shape, weight, self.eps)
 
 
 class Ideogram4Attention(nn.Module):
@@ -237,7 +272,7 @@ class Ideogram4EmbedScalar(nn.Module):
         x = x.to(torch.float32)
         scaled = 1e4 * (x - self.range_min) / (self.range_max - self.range_min)
         emb = _sinusoidal_embedding(scaled, self.dim)
-        emb = emb.to(getattr(self.mlp_in, "compute_dtype", None) or self.mlp_in.weight.dtype)
+        emb = emb.to(_resolve_compute_dtype(self.mlp_in))
         emb = F.silu(self.mlp_in(emb))
         return self.mlp_out(emb)
 
@@ -327,7 +362,7 @@ class Ideogram4Transformer(nn.Module):
         batch_size, seq_len, in_channels = x.shape
         assert in_channels == self.config.in_channels
 
-        param_dtype = getattr(self.input_proj, "compute_dtype", None) or self.input_proj.weight.dtype
+        param_dtype = _resolve_compute_dtype(self.input_proj)
         x = x.to(param_dtype)
         t = t.to(param_dtype)
         llm_features = llm_features.to(param_dtype)
@@ -353,7 +388,10 @@ class Ideogram4Transformer(nn.Module):
 
         h = x + llm_features
 
-        image_indicator_embedding = self.embed_image_indicator((indicator == OUTPUT_IMAGE_INDICATOR).to(torch.long))
+        image_indicator_embedding = F.embedding(
+            (indicator == OUTPUT_IMAGE_INDICATOR).to(torch.long),
+            _dequantized(self.embed_image_indicator.weight),
+        )
         h = h + image_indicator_embedding
 
         cos, sin = self.rotary_emb(position_ids)
