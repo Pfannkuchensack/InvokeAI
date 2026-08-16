@@ -3,6 +3,7 @@ from dataclasses import dataclass
 import torch
 import torchvision
 
+from invokeai.backend.krea2.prompt_weights import derive_attention_weights
 from invokeai.backend.stable_diffusion.diffusion.conditioning_data import Range
 from invokeai.backend.util.mask import to_standard_float_mask
 
@@ -11,6 +12,7 @@ from invokeai.backend.util.mask import to_standard_float_mask
 class Krea2TextConditioning:
     prompt_embeds: torch.Tensor
     mask: torch.Tensor | None
+    token_weights: torch.Tensor | None = None
 
 
 @dataclass
@@ -18,6 +20,7 @@ class Krea2RegionalTextConditioning:
     prompt_embeds: torch.Tensor
     image_masks: list[torch.Tensor | None]
     embedding_ranges: list[Range]
+    token_weights: torch.Tensor | None = None
 
 
 class Krea2RegionalPromptingExtension:
@@ -56,6 +59,8 @@ class Krea2RegionalPromptingExtension:
         prompt_embeds: list[torch.Tensor] = []
         image_masks: list[torch.Tensor | None] = []
         embedding_ranges: list[Range] = []
+        token_weights: list[torch.Tensor] = []
+        any_weighted = False
         current_start = 0
         for conditioning in text_conditionings:
             sequence_length = conditioning.prompt_embeds.shape[1]
@@ -68,10 +73,25 @@ class Krea2RegionalPromptingExtension:
             embedding_ranges.append(Range(start=current_start, end=current_start + sequence_length))
             current_start += sequence_length
 
+            # A weighted and an unweighted prompt can share a regional group, so stand in neutral weights
+            # for the unweighted ones and concatenate exactly like the embeddings.
+            weights = conditioning.token_weights
+            if weights is None:
+                weights = conditioning.prompt_embeds.new_ones(conditioning.prompt_embeds.shape[:2])
+            else:
+                if weights.shape != conditioning.prompt_embeds.shape[:2]:
+                    raise ValueError(
+                        f"Krea-2 token weights shape {tuple(weights.shape)} does not match prompt embedding "
+                        f"shape {tuple(conditioning.prompt_embeds.shape[:2])}."
+                    )
+                any_weighted = True
+            token_weights.append(weights)
+
         regional_text_conditioning = Krea2RegionalTextConditioning(
             prompt_embeds=torch.cat(prompt_embeds, dim=1),
             image_masks=image_masks,
             embedding_ranges=embedding_ranges,
+            token_weights=torch.cat(token_weights, dim=1) if any_weighted else None,
         )
         return cls(regional_text_conditioning=regional_text_conditioning, image_seq_len=image_seq_len)
 
@@ -81,6 +101,52 @@ class Krea2RegionalPromptingExtension:
         if self._attention_mask is None:
             self._attention_mask = self._build_attention_mask()
         return self._attention_mask
+
+    def get_token_weight_vectors(self, strength: float) -> tuple[torch.Tensor, torch.Tensor] | None:
+        """Build the joint-sequence value scale and key bias for the transformer's attention.
+
+        Returns ``(value_scale, key_bias)`` shaped ``(B, total_seq, 1, 1)`` and ``(B, 1, 1, total_seq)``
+        so they broadcast over heads and (for the bias) over query rows. Text tokens come first in the
+        joint sequence, so image positions are simply padded with the neutral 1.0 / 0.0. Returns ``None``
+        when there is nothing to apply, which keeps the unweighted path on exactly the code and tensors
+        it uses today.
+        """
+        token_weights = self.regional_text_conditioning.token_weights
+        if token_weights is None or strength == 0.0:
+            return None
+
+        value_scale, key_bias = derive_attention_weights(token_weights, strength)
+        if bool((value_scale == 1.0).all()) and bool((key_bias == 0.0).all()):
+            return None
+
+        batch_size = token_weights.shape[0]
+        image_scale = value_scale.new_ones((batch_size, self.image_seq_len))
+        image_bias = key_bias.new_zeros((batch_size, self.image_seq_len))
+        value_scale = torch.cat([value_scale, image_scale], dim=1)[:, :, None, None]
+        key_bias = torch.cat([key_bias, image_bias], dim=1)[:, None, None, :]
+        return value_scale, key_bias
+
+    def get_attention_mask_with_bias(self, key_bias: torch.Tensor | None, dtype: torch.dtype) -> torch.Tensor | None:
+        """Combine the regional mask and the key bias into the single mask SDPA takes.
+
+        With only a bias this is the ``(B, 1, 1, total_seq)`` tensor itself, which broadcasts over query
+        rows and costs nothing. With only a regional mask it is today's bool mask, untouched. With both,
+        the bool mask is folded into a float mask once per conditioning -- never per block -- because a
+        float mask is what SDPA converts a bool mask into internally anyway.
+        """
+        regional_mask = self.get_attention_mask()
+        if key_bias is None:
+            return regional_mask
+        if regional_mask is None:
+            return key_bias.to(dtype)
+
+        # finfo.min rather than -inf: a MATH fallback would turn a fully-masked query row into NaN. The
+        # bias is flattened to (1, total_seq) first so the result stays (total_seq, total_seq) rather than
+        # growing leading axes, keeping it the same size as the bool mask it replaces.
+        combined = torch.where(regional_mask, key_bias.reshape(1, -1).to(dtype), torch.finfo(dtype).min)
+        # The bool mask can be hundreds of MB at high resolution; the float mask supersedes it.
+        self._attention_mask = None
+        return combined
 
     def _build_attention_mask(self) -> torch.Tensor:
         conditioning = self.regional_text_conditioning

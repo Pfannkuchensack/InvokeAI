@@ -757,3 +757,102 @@ def test_regional_attention_memory_includes_masks_build_scratch_and_dtype_sized_
     assert Krea2DenoiseInvocation._regional_attention_mask_bytes(positive, negative, torch.bfloat16) == 500
     assert Krea2DenoiseInvocation._regional_attention_mask_bytes(positive, negative, torch.float32) == 740
     assert Krea2DenoiseInvocation._regional_attention_mask_bytes(positive, None, torch.bfloat16) == 400
+
+
+def test_load_text_conditioning_keeps_token_weights_aligned_through_compaction() -> None:
+    # Padding sits between the prompt body and the suffix, so the mask compaction reindexes the sequence.
+    # The weights must land on exactly the same positions the embeddings do, or emphasis silently moves to
+    # the wrong words. Asserting both in one test means a desync fails loudly.
+    invocation = Krea2DenoiseInvocation.model_construct()
+    embeds = torch.arange(4 * 12 * 8, dtype=torch.float32).reshape(1, 4, 12, 8)
+    conditionings = {
+        "prompt": ConditioningFieldData(
+            conditionings=[
+                Krea2ConditioningInfo(
+                    prompt_embeds=embeds,
+                    prompt_embeds_mask=torch.tensor([[True, False, True, False]]),
+                    token_weights=torch.tensor([[1.0, 9.0, 0.25, 9.0]]),
+                )
+            ]
+        )
+    }
+    context = SimpleNamespace(
+        conditioning=SimpleNamespace(load=lambda name: conditionings[name]),
+        tensors=SimpleNamespace(load=lambda _name: None),
+    )
+
+    extension = invocation._load_text_conditioning(
+        context=context,
+        conditioning_field=Krea2ConditioningField(conditioning_name="prompt"),
+        grid_height=1,
+        grid_width=2,
+        dtype=torch.float32,
+        device=torch.device("cpu"),
+    )
+
+    conditioning = extension.regional_text_conditioning
+    assert torch.equal(conditioning.prompt_embeds, embeds[:, [0, 2]])
+    assert torch.equal(conditioning.token_weights, torch.tensor([[1.0, 0.25]]))
+
+
+def test_load_text_conditioning_pads_unweighted_conditionings_in_a_regional_group() -> None:
+    # A weighted and an unweighted prompt can share a regional group; the unweighted one contributes
+    # neutral weights so the concatenation stays aligned with the embeddings.
+    invocation = Krea2DenoiseInvocation.model_construct()
+    conditionings = {
+        "weighted": ConditioningFieldData(
+            conditionings=[
+                Krea2ConditioningInfo(
+                    prompt_embeds=torch.ones(1, 2, 12, 8),
+                    token_weights=torch.tensor([[0.4, 1.7]]),
+                )
+            ]
+        ),
+        "plain": ConditioningFieldData(conditionings=[Krea2ConditioningInfo(prompt_embeds=torch.ones(1, 3, 12, 8))]),
+    }
+    context = SimpleNamespace(
+        conditioning=SimpleNamespace(load=lambda name: conditionings[name]),
+        tensors=SimpleNamespace(load=lambda _name: None),
+    )
+
+    extension = invocation._load_text_conditioning(
+        context=context,
+        conditioning_field=[
+            Krea2ConditioningField(conditioning_name="weighted"),
+            Krea2ConditioningField(conditioning_name="plain"),
+        ],
+        grid_height=1,
+        grid_width=2,
+        dtype=torch.float32,
+        device=torch.device("cpu"),
+    )
+
+    conditioning = extension.regional_text_conditioning
+    assert conditioning.token_weights.shape == conditioning.prompt_embeds.shape[:2] == (1, 5)
+    assert torch.equal(conditioning.token_weights, torch.tensor([[0.4, 1.7, 1.0, 1.0, 1.0]]))
+    # The weighted span must line up with that conditioning's embedding range.
+    assert conditioning.embedding_ranges[0].start == 0
+    assert conditioning.embedding_ranges[0].end == 2
+
+
+def test_load_text_conditioning_leaves_token_weights_unset_for_plain_prompts() -> None:
+    invocation = Krea2DenoiseInvocation.model_construct()
+    conditionings = {
+        "prompt": ConditioningFieldData(conditionings=[Krea2ConditioningInfo(prompt_embeds=torch.ones(1, 3, 12, 8))])
+    }
+    context = SimpleNamespace(
+        conditioning=SimpleNamespace(load=lambda name: conditionings[name]),
+        tensors=SimpleNamespace(load=lambda _name: None),
+    )
+
+    extension = invocation._load_text_conditioning(
+        context=context,
+        conditioning_field=Krea2ConditioningField(conditioning_name="prompt"),
+        grid_height=1,
+        grid_width=2,
+        dtype=torch.float32,
+        device=torch.device("cpu"),
+    )
+
+    assert extension.regional_text_conditioning.token_weights is None
+    assert extension.get_token_weight_vectors(1.0) is None

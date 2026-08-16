@@ -15,7 +15,7 @@ from invokeai.backend.stable_diffusion.diffusion.conditioning_data import (
     title="Seed Variance - Krea-2",
     tags=["conditioning", "krea2", "krea-2", "variance"],
     category="conditioning",
-    version="1.1.0",
+    version="1.2.0",
     classification=Classification.Prototype,
 )
 class Krea2SeedVarianceInvocation(BaseInvocation):
@@ -79,7 +79,11 @@ class Krea2SeedVarianceInvocation(BaseInvocation):
 
         new_data = ConditioningFieldData(
             conditionings=[
-                Krea2ConditioningInfo(prompt_embeds=embeds, prompt_embeds_mask=conditioning.prompt_embeds_mask)
+                Krea2ConditioningInfo(
+                    prompt_embeds=embeds,
+                    prompt_embeds_mask=conditioning.prompt_embeds_mask,
+                    token_weights=conditioning.token_weights,
+                )
             ]
         )
         conditioning_name = context.conditioning.save(new_data)

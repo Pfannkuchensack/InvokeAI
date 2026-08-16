@@ -50522,7 +50522,7 @@
         "tags": ["conditioning", "krea2", "krea-2"],
         "title": "Conditioning Rebalance - Krea-2",
         "type": "object",
-        "version": "1.1.0",
+        "version": "1.2.0",
         "output": {
           "$ref": "#/components/schemas/Krea2ConditioningOutput"
         }
@@ -50727,6 +50727,18 @@
             "orig_required": false,
             "title": "CFG Scale"
           },
+          "prompt_weight_strength": {
+            "default": 1.0,
+            "description": "Global multiplier for per-token prompt weights from the weighted Krea-2 prompt node. 0 disables weighting; above 1 pushes de-emphasised tokens into the subtractive range. Has no effect on prompts without weighting markers.",
+            "field_kind": "input",
+            "input": "any",
+            "maximum": 5.0,
+            "minimum": 0.0,
+            "orig_default": 1.0,
+            "orig_required": false,
+            "title": "Prompt Weight Strength",
+            "type": "number"
+          },
           "width": {
             "default": 1024,
             "description": "Width of the generated image.",
@@ -50801,7 +50813,7 @@
         "tags": ["image", "krea2", "krea-2"],
         "title": "Denoise - Krea-2",
         "type": "object",
-        "version": "1.2.0",
+        "version": "1.3.0",
         "output": {
           "$ref": "#/components/schemas/LatentsOutput"
         }
@@ -51292,7 +51304,7 @@
         "tags": ["conditioning", "krea2", "krea-2", "variance"],
         "title": "Seed Variance - Krea-2",
         "type": "object",
-        "version": "1.1.0",
+        "version": "1.2.0",
         "output": {
           "$ref": "#/components/schemas/Krea2ConditioningOutput"
         }
@@ -51301,7 +51313,7 @@
         "category": "conditioning",
         "class": "invocation",
         "classification": "prototype",
-        "description": "Encodes a text prompt for Krea-2 using the Qwen3-VL text encoder.\n\nThe encoder taps 12 decoder hidden-state layers and stacks them per token, producing a 4D\nconditioning tensor (B, seq, 12, hidden) that the Krea-2 transformer's text-fusion stage consumes.",
+        "description": "Encodes a text prompt for Krea-2 using the Qwen3-VL text encoder.\n\nThe encoder taps 12 decoder hidden-state layers and stacks them per token, producing a 4D\nconditioning tensor (B, seq, 12, hidden) that the Krea-2 transformer's text-fusion stage consumes.\n\nEnabling `token_weighting` additionally reads per-token prompt weights out of the prompt, letting you\nemphasise or remove individual phrases. See `invokeai.backend.krea2.prompt_weights` for the syntax and\n`prompt_weight_strength` on the denoise node for the global multiplier.",
         "node_pack": "invokeai",
         "properties": {
           "id": {
@@ -51344,6 +51356,16 @@
             "orig_required": true,
             "title": "Prompt",
             "ui_component": "textarea"
+          },
+          "token_weighting": {
+            "default": false,
+            "description": "Read per-token prompt weights from the prompt: (phrase:weight) or (phrase)weight. Below 1 weakens a phrase, 0 removes it, negative pushes towards its opposite, above 1 makes the image attend to it more. Parentheses with no number after them stay ordinary text, and \\( escapes a literal parenthesis. Off by default, so prompts are encoded exactly as written.",
+            "field_kind": "input",
+            "input": "any",
+            "orig_default": false,
+            "orig_required": false,
+            "title": "Token Weighting",
+            "type": "boolean"
           },
           "mask": {
             "anyOf": [
@@ -51389,7 +51411,7 @@
         "tags": ["prompt", "conditioning", "krea2", "krea-2"],
         "title": "Prompt - Krea-2",
         "type": "object",
-        "version": "1.1.0",
+        "version": "1.2.0",
         "output": {
           "$ref": "#/components/schemas/Krea2ConditioningOutput"
         }

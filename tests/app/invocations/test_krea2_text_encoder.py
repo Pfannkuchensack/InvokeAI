@@ -113,11 +113,13 @@ def test_encode_applies_qwen3_vl_lora_and_returns_selected_hidden_layers(monkeyp
     )
 
     lora_infos: list[_LoRAInfo] = []
-    embeds, mask = _invocation()._encode(_context(ModelPatchRaw(layers={}), lora_infos))
+    embeds, mask, token_weights = _invocation()._encode(_context(ModelPatchRaw(layers={}), lora_infos))
 
     assert embeds.shape == (1, 512, 12, 4)
     assert mask is not None
     assert mask.shape == (1, 512)
+    # token_weighting defaults to off, so no weights are produced.
+    assert token_weights is None
     assert captured["prefix"] == KREA2_LORA_QWEN3VL_PREFIX
     assert captured["patches"][0][1] == 0.5
 
@@ -147,7 +149,7 @@ def test_encode_preserves_suffix_for_a_prompt_that_overflows_truncation(monkeypa
     # Regression: a prompt longer than the tokenizer budget must NOT lose the assistant-turn suffix. The
     # encoder tokenizes (prefix + prompt) with truncation and appends the suffix AFTER, so the final tokens
     # always end with the suffix template (building one string and truncating it would cut the suffix off).
-    from invokeai.app.invocations.krea2_text_encoder import _KREA2_SUFFIX
+    from invokeai.backend.krea2.text_encoding import KREA2_SUFFIX as _KREA2_SUFFIX
 
     suffix_ids = [901, 902, 903, 904, 905]
 
@@ -240,7 +242,7 @@ def test_encode_preserves_suffix_for_a_prompt_that_overflows_truncation(monkeypa
 
 
 def test_encode_uses_reference_fixed_length_layout_and_position_ids(monkeypatch) -> None:
-    from invokeai.app.invocations.krea2_text_encoder import _KREA2_SUFFIX
+    from invokeai.backend.krea2.text_encoding import KREA2_SUFFIX as _KREA2_SUFFIX
 
     captured: dict = {}
 
@@ -320,11 +322,13 @@ def test_encode_uses_reference_fixed_length_layout_and_position_ids(monkeypatch)
         lambda _device: torch.float32,
     )
 
-    embeds, mask = invocation._encode(context)
+    embeds, mask, token_weights = invocation._encode(context)
 
     assert embeds.shape == (1, 512, 12, 4)
     assert mask is not None
     assert mask.shape == (1, 512)
+    # token_weighting defaults to off, so no weights are produced.
+    assert token_weights is None
     assert captured["input_ids"].shape == (1, 546)
     assert captured["attention_mask"].dtype == torch.bool
     assert captured["position_ids"].shape == (3, 1, 546)
@@ -337,7 +341,7 @@ def test_invoke_preserves_the_regional_mask_on_its_conditioning_output(monkeypat
     monkeypatch.setattr(
         invocation,
         "_encode",
-        lambda _context: (torch.zeros(1, 2, 12, 4), torch.ones(1, 2, dtype=torch.bool)),
+        lambda _context: (torch.zeros(1, 2, 12, 4), torch.ones(1, 2, dtype=torch.bool), None),
     )
     context = SimpleNamespace(conditioning=SimpleNamespace(save=lambda _data: "conditioning-name"))
 

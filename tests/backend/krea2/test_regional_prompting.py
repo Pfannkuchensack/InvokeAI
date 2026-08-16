@@ -163,11 +163,19 @@ def test_attention_processor_map_applies_regional_state_to_even_main_blocks_only
     processors = build_krea2_attention_processors(transformer, state)
 
     assert processors.keys() == transformer.attn_processors.keys()
+
+    # Text-fusion attention runs over the 12 tapped encoder layers, not prompt tokens, so it must never
+    # see a token-length mask or value scale.
     assert processors["text_fusion.layerwise_blocks.0.attn.processor"].regional_prompting_state is None
     assert processors["text_fusion.refiner_blocks.0.attn.processor"].regional_prompting_state is None
-    assert processors["transformer_blocks.0.attn.processor"].regional_prompting_state is state
-    assert processors["transformer_blocks.1.attn.processor"].regional_prompting_state is None
-    assert processors["transformer_blocks.2.attn.processor"].regional_prompting_state is state
+
+    # Every main block gets the state (per-token weights apply to all of them) but only even blocks
+    # consume the regional mask.
+    for index in (0, 1, 2):
+        assert processors[f"transformer_blocks.{index}.attn.processor"].regional_prompting_state is state
+    assert processors["transformer_blocks.0.attn.processor"].apply_regional_mask is True
+    assert processors["transformer_blocks.1.attn.processor"].apply_regional_mask is False
+    assert processors["transformer_blocks.2.attn.processor"].apply_regional_mask is True
 
 
 def test_only_even_main_blocks_apply_the_regional_mask_during_a_forward() -> None:
@@ -240,3 +248,195 @@ def test_regional_state_can_switch_between_positive_and_negative_masks() -> None
     assert state.attention_mask is negative
     state.set_attention_mask(None)
     assert state.attention_mask is None
+
+
+def _weighted_conditioning(weights: list[float]) -> Krea2TextConditioning:
+    return Krea2TextConditioning(
+        prompt_embeds=torch.ones(1, len(weights), 12, 8),
+        mask=None,
+        token_weights=torch.tensor([weights]),
+    )
+
+
+def test_token_weight_vectors_pad_image_positions_with_neutral_values() -> None:
+    # Text tokens come first in the joint sequence, so the image half must be exactly neutral or the
+    # weighting would leak into image/image attention.
+    extension = Krea2RegionalPromptingExtension.from_text_conditionings(
+        text_conditionings=[_weighted_conditioning([0.5, 1.0, 2.0])], image_seq_len=4
+    )
+
+    value_scale, key_bias = extension.get_token_weight_vectors(1.0)
+
+    assert value_scale.shape == (1, 7, 1, 1)
+    assert key_bias.shape == (1, 1, 1, 7)
+    assert value_scale.flatten().tolist() == pytest.approx([0.5, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0])
+    assert key_bias.flatten().tolist() == pytest.approx([0.0, 0.0, 2.0, 0.0, 0.0, 0.0, 0.0])
+
+
+def test_token_weight_vectors_are_none_without_weights_or_at_zero_strength() -> None:
+    unweighted = Krea2RegionalPromptingExtension.from_text_conditionings(
+        text_conditionings=[_conditioning(3, 1.0)], image_seq_len=4
+    )
+    weighted = Krea2RegionalPromptingExtension.from_text_conditionings(
+        text_conditionings=[_weighted_conditioning([0.5, 1.0])], image_seq_len=4
+    )
+    neutral = Krea2RegionalPromptingExtension.from_text_conditionings(
+        text_conditionings=[_weighted_conditioning([1.0, 1.0])], image_seq_len=4
+    )
+
+    assert unweighted.get_token_weight_vectors(1.0) is None
+    # strength 0 is the documented off switch, and all-neutral weights must not allocate anything either.
+    assert weighted.get_token_weight_vectors(0.0) is None
+    assert neutral.get_token_weight_vectors(1.0) is None
+
+
+def test_attention_mask_with_bias_returns_the_broadcast_bias_when_there_is_no_regional_mask() -> None:
+    extension = Krea2RegionalPromptingExtension.from_text_conditionings(
+        text_conditionings=[_weighted_conditioning([2.0, 1.0])], image_seq_len=4
+    )
+    _, key_bias = extension.get_token_weight_vectors(1.0)
+
+    mask = extension.get_attention_mask_with_bias(key_bias, torch.float32)
+
+    # A (1, 1, 1, S) bias broadcasts over query rows, so no (S, S) matrix is ever materialized.
+    assert mask.shape == (1, 1, 1, 6)
+    assert mask.dtype == torch.float32
+
+
+def test_attention_mask_with_bias_preserves_todays_bool_mask_when_nothing_is_weighted() -> None:
+    extension = Krea2RegionalPromptingExtension.from_text_conditionings(
+        text_conditionings=[_conditioning(2, 1.0, mask=torch.tensor([[[1.0, 0.0, 0.0, 0.0]]]))], image_seq_len=4
+    )
+
+    mask = extension.get_attention_mask_with_bias(None, torch.float32)
+
+    assert mask is not None
+    assert mask.dtype == torch.bool
+    assert torch.equal(mask, extension.get_attention_mask())
+
+
+def test_attention_mask_with_bias_folds_the_bias_into_the_regional_mask() -> None:
+    extension = Krea2RegionalPromptingExtension.from_text_conditionings(
+        text_conditionings=[
+            Krea2TextConditioning(
+                prompt_embeds=torch.ones(1, 2, 12, 8),
+                mask=torch.tensor([[[1.0, 0.0, 0.0, 0.0]]]),
+                token_weights=torch.tensor([[2.0, 1.0]]),
+            )
+        ],
+        image_seq_len=4,
+    )
+    bool_mask = extension.get_attention_mask().clone()
+    _, key_bias = extension.get_token_weight_vectors(1.0)
+
+    combined = extension.get_attention_mask_with_bias(key_bias, torch.float32)
+
+    assert combined.dtype == torch.float32
+    assert combined.shape == bool_mask.shape
+    # Allowed positions carry the bias; blocked ones carry finfo.min (not -inf, so a math fallback cannot NaN).
+    assert torch.isfinite(combined).all()
+    assert torch.equal(combined[bool_mask], key_bias.reshape(1, -1).expand_as(combined)[bool_mask])
+    assert (combined[~bool_mask] == torch.finfo(torch.float32).min).all()
+
+
+def test_token_weights_reach_every_main_block_in_a_real_forward() -> None:
+    """End-to-end wiring check: extension -> state -> processors -> transformer forward.
+
+    Weights must change the output (they are actually applied) and must reach every main block, not just
+    the even-numbered ones the regional mask uses.
+    """
+    torch.manual_seed(0)
+    transformer = _tiny_transformer().eval()
+    state = Krea2RegionalPromptingState()
+    transformer.set_attn_processor(build_krea2_attention_processors(transformer, state))
+
+    grid_height = grid_width = 2
+    image_seq_len = grid_height * grid_width
+    conditioning = Krea2TextConditioning(
+        prompt_embeds=torch.randn(1, 2, 2, 16), mask=None, token_weights=torch.tensor([[0.0, 2.0]])
+    )
+    extension = Krea2RegionalPromptingExtension.from_text_conditionings([conditioning], image_seq_len=image_seq_len)
+    prompt_embeds = extension.regional_text_conditioning.prompt_embeds
+    position_ids = prepare_position_ids(prompt_embeds.shape[1], grid_height, grid_width, torch.device("cpu"))
+    latents = torch.randn(1, image_seq_len, 4)
+
+    def _run() -> torch.Tensor:
+        with torch.no_grad():
+            return transformer(
+                hidden_states=latents,
+                encoder_hidden_states=prompt_embeds,
+                timestep=torch.tensor([0.5]),
+                position_ids=position_ids,
+                return_dict=False,
+            )[0]
+
+    baseline = _run()
+
+    value_scale, key_bias = extension.get_token_weight_vectors(1.0)
+    state.set_value_scale(value_scale)
+    state.set_attention_mask(extension.get_attention_mask_with_bias(key_bias, torch.float32))
+    weighted = _run()
+
+    assert weighted.shape == baseline.shape
+    assert torch.isfinite(weighted).all()
+    assert not torch.allclose(weighted, baseline, atol=1e-5, rtol=1e-5)
+
+    # Clearing the state restores the unweighted result exactly, so nothing leaks to the next generation
+    # via the cached transformer.
+    state.clear()
+    assert torch.equal(_run(), baseline)
+
+
+def test_token_weights_are_applied_by_odd_blocks_too() -> None:
+    # The regional mask deliberately skips odd blocks; prompt weights must not, or the effect is halved
+    # relative to the reference ComfyUI node.
+    torch.manual_seed(0)
+    transformer = _tiny_transformer().eval()
+    state = Krea2RegionalPromptingState()
+    transformer.set_attn_processor(build_krea2_attention_processors(transformer, state))
+
+    grid_height = grid_width = 2
+    image_seq_len = grid_height * grid_width
+    conditioning = Krea2TextConditioning(
+        prompt_embeds=torch.randn(1, 2, 2, 16), mask=None, token_weights=torch.tensor([[0.0, 1.0]])
+    )
+    extension = Krea2RegionalPromptingExtension.from_text_conditionings([conditioning], image_seq_len=image_seq_len)
+    prompt_embeds = extension.regional_text_conditioning.prompt_embeds
+    value_scale, _ = extension.get_token_weight_vectors(1.0)
+    state.set_value_scale(value_scale)
+
+    captured: dict[int, tuple[torch.Tensor, dict, torch.Tensor]] = {}
+
+    def _make_hook(index: int):
+        def _hook(_module, args, kwargs, output):
+            captured[index] = (args[0].detach().clone(), kwargs, output.detach().clone())
+
+        return _hook
+
+    handles = [
+        block.attn.register_forward_hook(_make_hook(index), with_kwargs=True)
+        for index, block in enumerate(transformer.transformer_blocks)
+    ]
+    try:
+        with torch.no_grad():
+            transformer(
+                hidden_states=torch.randn(1, image_seq_len, 4),
+                encoder_hidden_states=prompt_embeds,
+                timestep=torch.tensor([0.5]),
+                position_ids=prepare_position_ids(prompt_embeds.shape[1], grid_height, grid_width, torch.device("cpu")),
+                return_dict=False,
+            )
+    finally:
+        for handle in handles:
+            handle.remove()
+
+    # Replay each block's attention on its exact captured input and kwargs with the scale cleared, so the
+    # only difference is the weighting. Every block -- even and odd alike -- must differ.
+    assert set(captured) == {0, 1, 2}
+    state.set_value_scale(None)
+    for index, (attn_input, attn_kwargs, weighted_output) in captured.items():
+        with torch.no_grad():
+            unweighted_output = transformer.transformer_blocks[index].attn(attn_input, **attn_kwargs)
+        assert not torch.allclose(weighted_output, unweighted_output, atol=1e-5, rtol=1e-5), (
+            f"block {index} did not apply the token weights"
+        )

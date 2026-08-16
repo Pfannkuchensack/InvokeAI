@@ -73,7 +73,7 @@ def test_krea2_conditioning_is_saved_on_cpu(monkeypatch):
     cpu_mask = MagicMock(spec=torch.Tensor)
     gpu_embeds = _gpu_tensor_yielding(cpu_embeds)
     gpu_mask = _gpu_tensor_yielding(cpu_mask)
-    monkeypatch.setattr(invocation, "_encode", lambda context: (gpu_embeds, gpu_mask))
+    monkeypatch.setattr(invocation, "_encode", lambda context: (gpu_embeds, gpu_mask, None))
 
     context = MagicMock()
     context.conditioning.save.return_value = "cond-name"
@@ -85,6 +85,32 @@ def test_krea2_conditioning_is_saved_on_cpu(monkeypatch):
     info = context.conditioning.save.call_args.args[0].conditionings[0]
     assert info.prompt_embeds is cpu_embeds
     assert info.prompt_embeds_mask is cpu_mask
+    assert info.token_weights is None
+
+
+def test_krea2_token_weights_are_saved_on_cpu(monkeypatch):
+    """Per-token prompt weights ride along with the conditioning, so they must be offloaded too --
+    leaving them on the borrowed GPU would pin it for the lifetime of the stored conditioning."""
+    from invokeai.app.invocations.krea2_text_encoder import Krea2TextEncoderInvocation
+
+    invocation = Krea2TextEncoderInvocation.model_construct(
+        prompt="a (prompt:0.5)", token_weighting=True, mask=None, qwen3_vl_encoder=MagicMock()
+    )
+
+    cpu_embeds = MagicMock(spec=torch.Tensor)
+    cpu_weights = MagicMock(spec=torch.Tensor)
+    gpu_embeds = _gpu_tensor_yielding(cpu_embeds)
+    gpu_weights = _gpu_tensor_yielding(cpu_weights)
+    monkeypatch.setattr(invocation, "_encode", lambda context: (gpu_embeds, None, gpu_weights))
+
+    context = MagicMock()
+    context.conditioning.save.return_value = "cond-name"
+
+    invocation.invoke(context)
+
+    gpu_weights.detach.return_value.to.assert_called_once_with("cpu")
+    info = context.conditioning.save.call_args.args[0].conditionings[0]
+    assert info.token_weights is cpu_weights
 
 
 def test_krea2_regional_mask_is_passed_through_untouched(monkeypatch):
@@ -99,7 +125,7 @@ def test_krea2_regional_mask_is_passed_through_untouched(monkeypatch):
         prompt="a prompt", mask=mask_field, qwen3_vl_encoder=MagicMock()
     )
     monkeypatch.setattr(
-        invocation, "_encode", lambda context: (_gpu_tensor_yielding(MagicMock(spec=torch.Tensor)), None)
+        invocation, "_encode", lambda context: (_gpu_tensor_yielding(MagicMock(spec=torch.Tensor)), None, None)
     )
 
     context = MagicMock()

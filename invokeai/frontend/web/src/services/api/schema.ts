@@ -20097,6 +20097,12 @@ export type components = {
              */
             cfg_scale?: number | number[];
             /**
+             * Prompt Weight Strength
+             * @description Global multiplier for per-token prompt weights from the weighted Krea-2 prompt node. 0 disables weighting; above 1 pushes de-emphasised tokens into the subtractive range. Has no effect on prompts without weighting markers.
+             * @default 1
+             */
+            prompt_weight_strength?: number;
+            /**
              * Width
              * @description Width of the generated image.
              * @default 1024
@@ -20402,6 +20408,10 @@ export type components = {
          *
          *     The encoder taps 12 decoder hidden-state layers and stacks them per token, producing a 4D
          *     conditioning tensor (B, seq, 12, hidden) that the Krea-2 transformer's text-fusion stage consumes.
+         *
+         *     Enabling `token_weighting` additionally reads per-token prompt weights out of the prompt, letting you
+         *     emphasise or remove individual phrases. See `invokeai.backend.krea2.prompt_weights` for the syntax and
+         *     `prompt_weight_strength` on the denoise node for the global multiplier.
          */
         Krea2TextEncoderInvocation: {
             /**
@@ -20427,6 +20437,12 @@ export type components = {
              * @default null
              */
             prompt?: string | null;
+            /**
+             * Token Weighting
+             * @description Read per-token prompt weights from the prompt: (phrase:weight) or (phrase)weight. Below 1 weakens a phrase, 0 removes it, negative pushes towards its opposite, above 1 makes the image attend to it more. Parentheses with no number after them stay ordinary text, and \( escapes a literal parenthesis. Off by default, so prompts are encoded exactly as written.
+             * @default false
+             */
+            token_weighting?: boolean;
             /**
              * @description A mask defining the image region that this conditioning prompt applies to.
              * @default null

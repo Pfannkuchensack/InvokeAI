@@ -60,7 +60,7 @@ KREA2_LATENT_CHANNELS = 16
     title="Denoise - Krea-2",
     tags=["image", "krea2", "krea-2"],
     category="image",
-    version="1.2.0",
+    version="1.3.0",
     classification=Classification.Prototype,
 )
 class Krea2DenoiseInvocation(BaseInvocation, WithMetadata, WithBoard):
@@ -88,6 +88,16 @@ class Krea2DenoiseInvocation(BaseInvocation, WithMetadata, WithBoard):
     # CFG uses the standard formulation (uncond + cfg_scale*(cond-uncond)); cfg_scale <= 1 disables it.
     # Krea-2-Turbo is distilled and runs with CFG disabled (cfg_scale=1.0).
     cfg_scale: float | list[float] = InputField(default=1.0, description=FieldDescriptions.cfg_scale, title="CFG Scale")
+    prompt_weight_strength: float = InputField(
+        default=1.0,
+        ge=0.0,
+        le=5.0,
+        allow_inf_nan=False,
+        description="Global multiplier for per-token prompt weights from the weighted Krea-2 prompt node. "
+        "0 disables weighting; above 1 pushes de-emphasised tokens into the subtractive range. Has no "
+        "effect on prompts without weighting markers.",
+        title="Prompt Weight Strength",
+    )
     width: int = InputField(default=1024, gt=0, multiple_of=16, description="Width of the generated image.")
     height: int = InputField(default=1024, gt=0, multiple_of=16, description="Height of the generated image.")
     steps: int = InputField(default=8, gt=0, description=FieldDescriptions.steps)
@@ -158,6 +168,15 @@ class Krea2DenoiseInvocation(BaseInvocation, WithMetadata, WithBoard):
             assert isinstance(conditioning, Krea2ConditioningInfo)
             conditioning = conditioning.to(dtype=dtype, device=device)
             embeds = conditioning.prompt_embeds
+            # getattr: conditionings pickled before per-token weighting existed have no such attribute.
+            token_weights = getattr(conditioning, "token_weights", None)
+            if token_weights is not None:
+                if token_weights.shape != embeds.shape[:2]:
+                    raise ValueError(
+                        f"Krea-2 token weights shape {tuple(token_weights.shape)} does not match "
+                        f"prompt embedding shape {tuple(embeds.shape[:2])}."
+                    )
+                token_weights = token_weights.to(device=device, dtype=dtype)
             if conditioning.prompt_embeds_mask is not None:
                 mask = conditioning.prompt_embeds_mask.to(device=device, dtype=torch.bool)
                 if mask.shape != embeds.shape[:2]:
@@ -171,6 +190,14 @@ class Krea2DenoiseInvocation(BaseInvocation, WithMetadata, WithBoard):
                 embeds = torch.stack(
                     [batch_embeds[batch_mask] for batch_embeds, batch_mask in zip(embeds, mask, strict=True)]
                 )
+                # Same mask, same iteration: the weights cannot drift out of step with the embeddings.
+                if token_weights is not None:
+                    token_weights = torch.stack(
+                        [
+                            batch_weights[batch_mask]
+                            for batch_weights, batch_mask in zip(token_weights, mask, strict=False)
+                        ]
+                    )
             regional_mask = None
             if field.mask is not None:
                 mask = context.tensors.load(field.mask.tensor_name)
@@ -181,7 +208,9 @@ class Krea2DenoiseInvocation(BaseInvocation, WithMetadata, WithBoard):
                     dtype=dtype,
                     device=device,
                 )
-            text_conditionings.append(Krea2TextConditioning(prompt_embeds=embeds, mask=regional_mask))
+            text_conditionings.append(
+                Krea2TextConditioning(prompt_embeds=embeds, mask=regional_mask, token_weights=token_weights)
+            )
 
         # Masked padding does not contribute to attention. Remove it before concatenation to avoid multiplying
         # the text sequence length by the encoder's fixed 512-token allocation for every conditioning.
@@ -443,7 +472,7 @@ class Krea2DenoiseInvocation(BaseInvocation, WithMetadata, WithBoard):
             transformer.set_attn_processor(build_krea2_attention_processors(transformer, regional_prompting_state))
             # The processors remain installed on the cached transformer after this invocation. Do not let them
             # retain a potentially multi-GB regional mask between generations, including when denoising raises.
-            exit_stack.callback(regional_prompting_state.set_attention_mask, None)
+            exit_stack.callback(regional_prompting_state.clear)
 
             exit_stack.enter_context(
                 LayerPatcher.apply_smart_model_patches(
@@ -456,14 +485,34 @@ class Krea2DenoiseInvocation(BaseInvocation, WithMetadata, WithBoard):
                 )
             )
 
-            pos_regional_attention_mask = pos_extension.get_attention_mask()
-            neg_regional_attention_mask = neg_extension.get_attention_mask() if neg_extension is not None else None
+            # Per-token prompt weights are installed per CFG pass, alongside the regional mask, so the
+            # positive prompt's weights never leak into the unconditional pass. That is why CFG can stay
+            # free here, unlike the ComfyUI node's model-level patch which requires pinning it to 1.0.
+            pos_weights = pos_extension.get_token_weight_vectors(self.prompt_weight_strength)
+            neg_weights = (
+                neg_extension.get_token_weight_vectors(self.prompt_weight_strength)
+                if neg_extension is not None
+                else None
+            )
+            pos_value_scale = pos_weights[0] if pos_weights is not None else None
+            neg_value_scale = neg_weights[0] if neg_weights is not None else None
+            pos_attention_mask = pos_extension.get_attention_mask_with_bias(
+                pos_weights[1] if pos_weights is not None else None, inference_dtype
+            )
+            neg_attention_mask = (
+                neg_extension.get_attention_mask_with_bias(
+                    neg_weights[1] if neg_weights is not None else None, inference_dtype
+                )
+                if neg_extension is not None
+                else None
+            )
 
             for step_idx, t in enumerate(tqdm(timesteps_sched)):
                 # The pipeline passes timestep / num_train_timesteps to the transformer.
                 timestep = (t / num_train_timesteps).expand(latents.shape[0]).to(inference_dtype)
 
-                regional_prompting_state.set_attention_mask(pos_regional_attention_mask)
+                regional_prompting_state.set_attention_mask(pos_attention_mask)
+                regional_prompting_state.set_value_scale(pos_value_scale)
                 noise_pred_cond = transformer(
                     hidden_states=latents,
                     encoder_hidden_states=pos_prompt_embeds,
@@ -476,7 +525,8 @@ class Krea2DenoiseInvocation(BaseInvocation, WithMetadata, WithBoard):
                 if self._should_apply_cfg_for_step(
                     cfg_scale[step_idx], has_negative_conditioning=neg_prompt_embeds is not None
                 ):
-                    regional_prompting_state.set_attention_mask(neg_regional_attention_mask)
+                    regional_prompting_state.set_attention_mask(neg_attention_mask)
+                    regional_prompting_state.set_value_scale(neg_value_scale)
                     noise_pred_uncond = transformer(
                         hidden_states=latents,
                         encoder_hidden_states=neg_prompt_embeds,

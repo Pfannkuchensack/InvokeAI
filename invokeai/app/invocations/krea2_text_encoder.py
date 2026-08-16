@@ -14,12 +14,8 @@ from invokeai.app.invocations.fields import (
 from invokeai.app.invocations.model import Qwen3VLEncoderField
 from invokeai.app.invocations.primitives import Krea2ConditioningOutput
 from invokeai.app.services.shared.invocation_context import InvocationContext
-from invokeai.backend.krea2.sampling_utils import (
-    KREA2_MAX_SEQ_LEN,
-    KREA2_NUM_SUFFIX_TOKENS,
-    KREA2_SELECT_LAYERS,
-    KREA2_START_IDX,
-)
+from invokeai.backend.krea2.prompt_weights import parse_weighted_prompt
+from invokeai.backend.krea2.text_encoding import encode_krea2_prompt
 from invokeai.backend.model_manager.load.model_cache.utils import get_effective_device
 from invokeai.backend.patches.layer_patcher import LayerPatcher, PatchSpec
 from invokeai.backend.patches.lora_conversions.krea2_lora_constants import KREA2_LORA_QWEN3VL_PREFIX
@@ -30,22 +26,13 @@ from invokeai.backend.stable_diffusion.diffusion.conditioning_data import (
 )
 from invokeai.backend.util.devices import TorchDevice
 
-# Prompt template from diffusers Krea2Pipeline.get_text_hidden_states. The prefix (a system turn that
-# instructs the model to describe the image) is the same "generate" template used by Qwen-Image, which
-# is why the first KREA2_START_IDX (34) tokens are dropped from the encoder output.
-_KREA2_PREFIX = (
-    "<|im_start|>system\nDescribe the image by detailing the color, shape, size, texture, quantity, text, "
-    "spatial relationships of the objects and background:<|im_end|>\n<|im_start|>user\n"
-)
-_KREA2_SUFFIX = "<|im_end|>\n<|im_start|>assistant\n"
-
 
 @invocation(
     "krea2_text_encoder",
     title="Prompt - Krea-2",
     tags=["prompt", "conditioning", "krea2", "krea-2"],
     category="conditioning",
-    version="1.1.0",
+    version="1.2.0",
     classification=Classification.Prototype,
     idle_gpu_offloadable=True,
 )
@@ -54,9 +41,21 @@ class Krea2TextEncoderInvocation(BaseInvocation):
 
     The encoder taps 12 decoder hidden-state layers and stacks them per token, producing a 4D
     conditioning tensor (B, seq, 12, hidden) that the Krea-2 transformer's text-fusion stage consumes.
+
+    Enabling `token_weighting` additionally reads per-token prompt weights out of the prompt, letting you
+    emphasise or remove individual phrases. See `invokeai.backend.krea2.prompt_weights` for the syntax and
+    `prompt_weight_strength` on the denoise node for the global multiplier.
     """
 
     prompt: str = InputField(description="Text prompt describing the desired image.", ui_component=UIComponent.Textarea)
+    token_weighting: bool = InputField(
+        default=False,
+        description="Read per-token prompt weights from the prompt: (phrase:weight) or (phrase)weight. "
+        "Below 1 weakens a phrase, 0 removes it, negative pushes towards its opposite, above 1 makes the "
+        "image attend to it more. Parentheses with no number after them stay ordinary text, and \\( escapes "
+        "a literal parenthesis. Off by default, so prompts are encoded exactly as written.",
+        title="Token Weighting",
+    )
     mask: TensorField | None = InputField(
         default=None,
         description="A mask defining the image region that this conditioning prompt applies to.",
@@ -70,27 +69,31 @@ class Krea2TextEncoderInvocation(BaseInvocation):
 
     @torch.no_grad()
     def invoke(self, context: InvocationContext) -> Krea2ConditioningOutput:
-        prompt_embeds, prompt_mask = self._encode(context)
+        prompt_embeds, prompt_mask, token_weights = self._encode(context)
         prompt_embeds = prompt_embeds.detach().to("cpu")
         prompt_mask = prompt_mask.detach().to("cpu") if prompt_mask is not None else None
+        token_weights = token_weights.detach().to("cpu") if token_weights is not None else None
 
         conditioning_data = ConditioningFieldData(
-            conditionings=[Krea2ConditioningInfo(prompt_embeds=prompt_embeds, prompt_embeds_mask=prompt_mask)]
+            conditionings=[
+                Krea2ConditioningInfo(
+                    prompt_embeds=prompt_embeds,
+                    prompt_embeds_mask=prompt_mask,
+                    token_weights=token_weights,
+                )
+            ]
         )
         conditioning_name = context.conditioning.save(conditioning_data)
         return Krea2ConditioningOutput.build(conditioning_name, mask=self.mask)
 
-    def _encode(self, context: InvocationContext) -> tuple[torch.Tensor, torch.Tensor | None]:
+    def _encode(self, context: InvocationContext) -> tuple[torch.Tensor, torch.Tensor | None, torch.Tensor | None]:
         tokenizer_info = context.models.load(self.qwen3_vl_encoder.tokenizer)
         text_encoder_info = context.models.load(self.qwen3_vl_encoder.text_encoder)
 
-        # diffusers tokenizes (prefix + prompt) and the assistant-turn suffix separately, then
-        # concatenates - so the suffix always survives truncation. Building one string and truncating it
-        # (right-truncation) drops the suffix for long (>~500-token) prompts, corrupting the trained token
-        # layout that the fixed prefix-drop (KREA2_START_IDX) and suffix accounting depend on.
-        body_text = _KREA2_PREFIX + self.prompt
-        # Reserve room for the suffix (diffusers: max_sequence_length + start_idx - num_suffix_tokens).
-        body_max_length = KREA2_MAX_SEQ_LEN + KREA2_START_IDX - KREA2_NUM_SUFFIX_TOKENS
+        # Strip the weighting markers before anything touches the encoder: the text that gets encoded must
+        # be exactly what an unweighted run would encode, or enabling weighting would change the prompt
+        # itself rather than only the emphasis. With the switch off the prompt is passed through untouched.
+        prompt, spans = parse_weighted_prompt(self.prompt) if self.token_weighting else (self.prompt, [])
 
         context.util.signal_progress("Running Qwen3-VL text encoder")
 
@@ -111,53 +114,7 @@ class Krea2TextEncoderInvocation(BaseInvocation):
                 )
             )
 
-            body_inputs = tokenizer(
-                body_text,
-                max_length=body_max_length,
-                truncation=True,
-                padding="max_length",
-                return_tensors="pt",
-            )
-            # Append the suffix AFTER truncation so it can never be cut, matching the reference layout.
-            suffix_inputs = tokenizer(_KREA2_SUFFIX, return_tensors="pt")
-            input_ids = torch.cat([body_inputs.input_ids, suffix_inputs.input_ids], dim=1).to(device=device)
-            attention_mask = torch.cat([body_inputs.attention_mask, suffix_inputs.attention_mask], dim=1).to(
-                device=device, dtype=torch.bool
-            )
-            # Padding sits between the prompt body and assistant suffix. Count only valid tokens when
-            # assigning positions so the suffix receives the same mRoPE phase as it did during training.
-            position_ids = (attention_mask.long().cumsum(dim=-1) - 1).clamp(min=0)
-            position_ids = position_ids.unsqueeze(0).expand(3, -1, -1)
-
-            outputs = text_encoder(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                position_ids=position_ids,
-                output_hidden_states=True,
-                use_cache=False,
-                return_dict=True,
-            )
-
-            # Some VL models nest the language-model output; fall back to that if needed.
-            hidden_states_tuple = getattr(outputs, "hidden_states", None)
-            if hidden_states_tuple is None:
-                lm_output = getattr(outputs, "language_model_outputs", None)
-                hidden_states_tuple = getattr(lm_output, "hidden_states", None)
-            if hidden_states_tuple is None:
-                raise RuntimeError("Qwen3-VL encoder did not return hidden_states; cannot build Krea-2 conditioning.")
-
-            # Stack the selected layers along a new layer axis: (B, seq, 12, hidden).
-            stacked = torch.stack([hidden_states_tuple[i] for i in KREA2_SELECT_LAYERS], dim=2)
-
-            # Drop the system-prompt prefix tokens.
-            prompt_embeds = stacked[:, KREA2_START_IDX:]
-            prompt_mask = attention_mask[:, KREA2_START_IDX:].bool()
-
-            # Match the device-safe compute dtype used by the denoise loop (falls back from bf16 to
-            # fp16/fp32 on devices without bf16 support) rather than forcing bfloat16.
-            prompt_embeds = prompt_embeds.to(dtype=TorchDevice.choose_bfloat16_safe_dtype(device))
-
-        return prompt_embeds, prompt_mask
+            return encode_krea2_prompt(prompt, tokenizer, text_encoder, spans)
 
     def _lora_iterator(self, context: InvocationContext) -> Iterator[PatchSpec]:
         """Iterate over the LoRA models to apply to the Qwen3-VL text encoder."""

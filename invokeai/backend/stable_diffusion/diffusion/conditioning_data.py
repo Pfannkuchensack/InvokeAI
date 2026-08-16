@@ -149,10 +149,17 @@ class Krea2ConditioningInfo:
     prompt_embeds_mask: torch.Tensor | None = None
     """Attention mask for prompt_embeds. Shape: (batch_size, seq_len). 1/True for valid, 0/False for padding."""
 
+    token_weights: torch.Tensor | None = None
+    """Per-token prompt weights, aligned 1:1 with prompt_embeds' sequence axis. Shape: (batch_size, seq_len).
+    1.0 is neutral; None means the prompt carried no weighting markers. The denoise loop turns these into
+    the attention value scale and key bias (see invokeai.backend.krea2.prompt_weights)."""
+
     def to(self, device: torch.device | None = None, dtype: torch.dtype | None = None):
         self.prompt_embeds = self.prompt_embeds.to(device=device, dtype=dtype)
         if self.prompt_embeds_mask is not None:
             self.prompt_embeds_mask = self.prompt_embeds_mask.to(device=device)
+        if self.token_weights is not None:
+            self.token_weights = self.token_weights.to(device=device)
         return self
 
 
