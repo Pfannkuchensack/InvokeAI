@@ -65,7 +65,7 @@ from invokeai.backend.patches.lora_conversions.qwen_image_lora_conversion_utils 
     lora_model_from_qwen_image_state_dict,
 )
 from invokeai.backend.patches.lora_conversions.sd_lora_conversion_utils import lora_model_from_sd_state_dict
-from invokeai.backend.patches.lora_conversions.sdxl_lora_conversion_utils import convert_sdxl_keys_to_diffusers_format
+from invokeai.backend.patches.lora_conversions.sdxl_lora_conversion_utils import lora_model_from_sdxl_state_dict
 from invokeai.backend.patches.lora_conversions.wan_lora_conversion_utils import lora_model_from_wan_state_dict
 from invokeai.backend.patches.lora_conversions.z_image_lora_conversion_utils import lora_model_from_z_image_state_dict
 
@@ -123,8 +123,7 @@ class LoRALoader(ModelLoader):
 
         # Apply state_dict key conversions, if necessary.
         if self._model_base == BaseModelType.StableDiffusionXL:
-            state_dict = convert_sdxl_keys_to_diffusers_format(state_dict)
-            model = lora_model_from_sd_state_dict(state_dict=state_dict)
+            model = lora_model_from_sdxl_state_dict(state_dict=state_dict)
         elif self._model_base in (BaseModelType.Flux, BaseModelType.Flux2):
             if config.format is ModelFormat.OMI:
                 # HACK(ryand): We set alpha=None for diffusers PEFT format models. These models are typically

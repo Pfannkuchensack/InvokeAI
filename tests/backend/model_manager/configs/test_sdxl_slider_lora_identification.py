@@ -170,9 +170,9 @@ class TestSdxlUnetLoraDetection:
 
     def test_diffusers_peft_format_not_matched(self):
         # `unet.….lora_A.weight` also returns None from lora_token_vector_length(), so it
-        # reaches this fallback. It must NOT match: convert_sdxl_keys_to_diffusers_format()
-        # rejects any prefix other than lora_unet_/lora_te1_/lora_te2_, so identifying it as
-        # SDXL would turn an inert Unknown model into a mid-generation crash.
+        # reaches this fallback. It must NOT match: the SDXL conversion rejects any prefix
+        # other than lora_unet_/lora_te1_/lora_te2_, so identifying it as SDXL would turn an
+        # inert Unknown model into a mid-generation crash.
         sd = _diffusers_peft_keys()
         assert _state_dict_looks_like_sdxl_unet_lora(sd) is False
         with pytest.raises(ValueError, match="Unrecognized SDXL LoRA key prefix"):
@@ -274,7 +274,7 @@ class TestSdxlSliderLoraDiffusersFolderIdentification:
     @patch("invokeai.backend.model_manager.configs.lora.raise_if_not_dir")
     def test_diffusers_peft_slider_is_not_claimed_as_sdxl(self, _rid, _flux, tmp_path: Path):
         # Regression guard for the false positive: these keys must stay unidentified rather
-        # than install as SDXL and crash later in convert_sdxl_keys_to_diffusers_format().
+        # than install as SDXL and crash later in lora_model_from_sdxl_state_dict().
         mod = self._make_mock_mod(tmp_path, _diffusers_peft_keys())
         with pytest.raises(NotAMatchError, match="unrecognized token vector length"):
             LoRA_Diffusers_SDXL_Config.from_model_on_disk(mod, {**_REQUIRED_FIELDS, "path": str(tmp_path)})

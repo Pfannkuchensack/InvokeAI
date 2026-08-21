@@ -19,27 +19,34 @@ class MergedLayerPatch(BaseLayerPatch):
     This class was created to handle a special case with FLUX LoRA models. In the BFL FLUX model format, the attention
     Q, K, V matrices are concatenated along the first dimension. In the diffusers LoRA format, the Q, K, V matrices are
     stored as separate tensors. This class enables diffusers LoRA layers to be used in BFL FLUX models.
+
+    A sub-layer's range may also be `None`, meaning that it covers the full parameter rather than a slice of it. This
+    is used to sum several patches that all target the same module - see
+    `lora_model_from_sdxl_state_dict()`, where a single UNet layer can be patched under two naming conventions.
     """
 
     def __init__(
         self,
         lora_layers: Sequence[BaseLayerPatch],
-        ranges: Sequence[Range],
+        ranges: Sequence[Range | None],
     ):
         super().__init__()
 
         self.lora_layers = lora_layers
-        # self.ranges[i] is the range for the i'th lora layer along the 0'th weight dimension.
+        # self.ranges[i] is the range for the i'th lora layer along the 0'th weight dimension, or None if that
+        # layer covers the full weight.
         self.ranges = ranges
         assert len(self.ranges) == len(self.lora_layers)
 
     def get_parameters(self, orig_parameters: dict[str, torch.Tensor], weight: float) -> dict[str, torch.Tensor]:
         out_parameters: dict[str, torch.Tensor] = {}
 
-        for lora_layer, range in zip(self.lora_layers, self.ranges, strict=True):
-            sliced_parameters: dict[str, torch.Tensor] = {
-                n: p[range.start : range.end] for n, p in orig_parameters.items()
-            }
+        for lora_layer, layer_range in zip(self.lora_layers, self.ranges, strict=True):
+            sliced_parameters: dict[str, torch.Tensor] = (
+                orig_parameters
+                if layer_range is None
+                else {n: p[layer_range.start : layer_range.end] for n, p in orig_parameters.items()}
+            )
 
             # Note that `weight` is applied in the sub-layers, no need to apply it in this function.
             layer_out_parameters = lora_layer.get_parameters(sliced_parameters, weight)
@@ -53,7 +60,10 @@ class MergedLayerPatch(BaseLayerPatch):
                         dtype=out_param.dtype,
                         device=out_param.device,
                     )
-                out_parameters[out_param_name][range.start : range.end] += out_param
+                if layer_range is None:
+                    out_parameters[out_param_name] += out_param
+                else:
+                    out_parameters[out_param_name][layer_range.start : layer_range.end] += out_param
 
         return out_parameters
 

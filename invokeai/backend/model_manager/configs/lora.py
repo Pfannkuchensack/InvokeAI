@@ -110,7 +110,7 @@ def _get_flux_lora_format(mod: ModelOnDisk) -> FluxLoRAFormat | None:
 # Matches an SDXL UNet attention key, capturing the transformer_blocks index.
 #
 # Anchored on the `lora_unet_` prefix because that is exactly the key set
-# `convert_sdxl_keys_to_diffusers_format()` can convert at load time — keys outside it
+# `lora_model_from_sdxl_state_dict()` can convert at load time — keys outside it
 # (e.g. diffusers/PEFT `unet.….lora_A.weight`) would be identified as SDXL here only to
 # raise `ValueError: Unrecognized SDXL LoRA key prefix` mid-generation.
 #
