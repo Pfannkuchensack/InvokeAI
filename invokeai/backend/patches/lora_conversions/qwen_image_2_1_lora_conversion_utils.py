@@ -6,7 +6,9 @@ from invokeai.backend.patches.layers.base_layer_patch import BaseLayerPatch
 from invokeai.backend.patches.layers.utils import any_lora_layer_from_state_dict
 from invokeai.backend.patches.lora_conversions.qwen_image_2_1_lora_constants import (
     GATE_UP,
+    QWEN_IMAGE_21_LORA_NORM_PREFIX,
     QWEN_IMAGE_21_LORA_TRANSFORMER_PREFIX,
+    is_norm,
     split_key,
     unsupported_keys,
 )
@@ -38,7 +40,8 @@ def _split_gate_up(module: str, values: dict[str, torch.Tensor]) -> dict[str, di
 def lora_model_from_qwen_image_21_state_dict(state_dict: dict[str, torch.Tensor]) -> ModelPatchRaw:
     """Convert a Qwen-Image-2.1 LoRA to a patch for the diffusers transformer.
 
-    A layer without an `alpha` scales by 1 (its alpha is its rank), as ComfyUI applies it.
+    A layer without an `alpha` scales by 1 (its alpha is its rank), as ComfyUI applies it. Norm diffs go under
+    `QWEN_IMAGE_21_LORA_NORM_PREFIX`, the Linears under `QWEN_IMAGE_21_LORA_TRANSFORMER_PREFIX`.
     """
     unsupported = unsupported_keys(state_dict)
     if unsupported:
@@ -46,8 +49,8 @@ def lora_model_from_qwen_image_21_state_dict(state_dict: dict[str, torch.Tensor]
         # partial LoRA that passes for a whole one.
         raise ValueError(
             f"{len(unsupported)} part(s) of this LoRA do not apply to Qwen-Image-2.1, e.g. {unsupported[0]!r}: "
-            "it targets layers this model does not have, or a LoKR, LoHA or LyCORIS DoRA layer on the fused "
-            "gate_up projection."
+            "it targets layers this model does not have, a norm with anything but a full diff, or a LoKR, LoHA "
+            "or LyCORIS DoRA layer on the fused gate_up projection."
         )
 
     grouped: dict[str, dict[str, torch.Tensor]] = {}
@@ -60,6 +63,7 @@ def lora_model_from_qwen_image_21_state_dict(state_dict: dict[str, torch.Tensor]
     layers: dict[str, BaseLayerPatch] = {}
     for module, values in grouped.items():
         targets = _split_gate_up(module, values) if module.endswith(GATE_UP) else {module: values}
+        prefix = QWEN_IMAGE_21_LORA_NORM_PREFIX if is_norm(module) else QWEN_IMAGE_21_LORA_TRANSFORMER_PREFIX
         for target, target_values in targets.items():
-            layers[f"{QWEN_IMAGE_21_LORA_TRANSFORMER_PREFIX}{target}"] = any_lora_layer_from_state_dict(target_values)
+            layers[f"{prefix}{target}"] = any_lora_layer_from_state_dict(target_values)
     return ModelPatchRaw(layers=layers)

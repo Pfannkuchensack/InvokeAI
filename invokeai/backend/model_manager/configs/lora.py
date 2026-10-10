@@ -913,32 +913,63 @@ class LoRA_LyCORIS_QwenImage_Config(LoRA_LyCORIS_Config_Base, Config_Base):
 
 
 _QWEN_IMAGE21_HIDDEN_SIZE = 4096
-_QWEN_IMAGE21_MLP_MARKERS = ("img_mlp.gate_up.", "img_mlp.gate_layer.", "img_mlp_gate_up", "img_mlp_gate_layer")
-# A block's own attention, dotted or Kohya-flattened. Anchored to the block: LTX-2's `audio_to_video_attn.to_q`
-# is as wide and would match the bare `attn.to_q`.
-_BLOCK_ATTENTION_PROJECTION = re.compile(r"transformer_blocks[._]\d+[._]attn[._]to_[qkv][._]")
+# Qwen-Image-2.1's gated MLP, by any of its names: diffusers' `gate_layer`/`proj`/`out`, ComfyUI's fused `gate_up`,
+# dotted or Kohya-flattened. Qwen-Image's MLP is `img_mlp.net.0.proj`/`img_mlp.net.2`, which none of these match.
+_QWEN_IMAGE21_MLP_MARKERS = (
+    "img_mlp.gate_up.",
+    "img_mlp.gate_layer.",
+    "img_mlp.proj.",
+    "img_mlp.out.",
+    "img_mlp_gate_up",
+    "img_mlp_gate_layer",
+    "img_mlp_proj",
+    "img_mlp_out",
+)
+# A block's own attention projections, dotted or Kohya-flattened. Anchored to the block: LTX-2's
+# `audio_to_video_attn.to_q` is as wide and would match the bare `attn.to_q`.
+_BLOCK_ATTENTION_PROJECTION = re.compile(r"transformer_blocks[._]\d+[._]attn[._]to_(?:[qkv]|out[._]0)[._]")
+_LOKR_FACTOR = re.compile(r"\.(lokr_w[12])(?:_b)?$")
+
+
+def _block_attention_in_features(state_dict: dict[str | int, Any]) -> tuple[set[int], set[int]]:
+    """The input widths of the block-attention projections a LoRA targets: of its low-rank layers, and of its
+    LoKR ones.
+
+    A low-rank layer carries the width on its input-side matrix; a LoKR weight is the Kronecker product of two
+    factors, so its input width is the product of theirs (each given whole, or as the second matrix of a pair).
+    """
+    low_rank: set[int] = set()
+    factored: set[int] = set()
+    lokr: dict[str, dict[str, int]] = {}
+    for key, value in state_dict.items():
+        if not isinstance(key, str) or _BLOCK_ATTENTION_PROJECTION.search(key) is None:
+            continue
+        shape = getattr(value, "shape", ())
+        if len(shape) != 2:
+            continue
+        if key.endswith((".lora_A.weight", ".lora_down.weight")):
+            low_rank.add(shape[1])
+        elif factor := _LOKR_FACTOR.search(key):
+            lokr.setdefault(key[: factor.start()], {})[factor.group(1)] = shape[1]
+    factored.update(f["lokr_w1"] * f["lokr_w2"] for f in lokr.values() if len(f) == 2)
+    return low_rank, factored
 
 
 def _has_qwen_image21_lora_keys(state_dict: dict[str | int, Any]) -> bool:
     """True if the state dict is a Qwen-Image-2.1 LoRA, whose module names otherwise overlap Qwen-Image's.
 
-    Its gated MLP (`gate_layer` in diffusers/PEFT, ComfyUI's fused `gate_up`, and their Kohya spellings) is
-    Qwen-Image-2.1's alone. An attention-only LoRA -- PEFT's usual `to_q/to_k/to_v` targets -- names nothing
-    Qwen-Image lacks, so its width decides: the projections read 4096 features here and 3072 in Qwen-Image.
+    Its gated MLP (`gate_layer`, `proj` and `out` in diffusers/PEFT, ComfyUI's fused `gate_up`, and their Kohya
+    spellings) is Qwen-Image-2.1's alone. An attention-only LoRA -- PEFT's usual `to_q/to_k/to_v` targets, or
+    `to_out.0` -- names nothing Qwen-Image lacks, so its width decides: the projections read 4096 features here
+    and 3072 in Qwen-Image. A LoKR layer's width is a product of factor sizes, weaker evidence on its own, so it
+    counts only where every key also names a Qwen-Image-2.1 module.
     """
-    for key, value in state_dict.items():
-        if not isinstance(key, str):
-            continue
-        if any(marker in key for marker in _QWEN_IMAGE21_MLP_MARKERS):
-            return True
-        if (
-            key.endswith((".lora_A.weight", ".lora_down.weight"))
-            and _BLOCK_ATTENTION_PROJECTION.search(key) is not None
-            and len(getattr(value, "shape", ())) == 2
-            and value.shape[1] == _QWEN_IMAGE21_HIDDEN_SIZE
-        ):
-            return True
-    return False
+    if any(isinstance(key, str) and any(m in key for m in _QWEN_IMAGE21_MLP_MARKERS) for key in state_dict):
+        return True
+    low_rank, factored = _block_attention_in_features(state_dict)
+    if _QWEN_IMAGE21_HIDDEN_SIZE in low_rank:
+        return True
+    return _QWEN_IMAGE21_HIDDEN_SIZE in factored and not qwen_image_21_unsupported_lora_keys(state_dict)
 
 
 def _has_krea2_lora_keys(state_dict: dict[str | int, Any]) -> bool:

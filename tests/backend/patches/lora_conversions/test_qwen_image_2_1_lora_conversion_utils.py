@@ -8,6 +8,9 @@ from invokeai.backend.patches.layers.dora_layer import DoRALayer
 from invokeai.backend.patches.layers.full_layer import FullLayer
 from invokeai.backend.patches.layers.lora_layer import LoRALayer
 from invokeai.backend.patches.lora_conversions.qwen_image_2_1_lora_conversion_utils import (
+    QWEN_IMAGE_21_LORA_NORM_PREFIX as NORM_PREFIX,
+)
+from invokeai.backend.patches.lora_conversions.qwen_image_2_1_lora_conversion_utils import (
     QWEN_IMAGE_21_LORA_TRANSFORMER_PREFIX as PREFIX,
 )
 from invokeai.backend.patches.lora_conversions.qwen_image_2_1_lora_conversion_utils import (
@@ -106,6 +109,22 @@ def test_an_output_dim_dora_on_gate_up_splits_its_magnitude_with_the_rows(magnit
     assert torch.equal(gate.dora_scale, magnitude[:4]) and torch.equal(proj.dora_scale, magnitude[4:])
 
 
+@pytest.mark.parametrize("layout", ["comfy", "kohya"])
+def test_norm_diffs_land_on_their_norm_weights_apart_from_the_linears(transformer, layout: str) -> None:
+    # As the official Turbo LoRA carries them: a full diff on every block's q/k norm and on the text norm.
+    norms = ["transformer_blocks.1.attn.norm_q", "transformer_blocks.1.attn.norm_k", "txt_in.text_norm"]
+    name = (lambda m: f"diffusion_model.{m}") if layout == "comfy" else _kohya
+    sd = {f"{name(m)}.diff": torch.randn(transformer.get_submodule(m).weight.shape) for m in norms}
+    sd |= _pair(name("transformer_blocks.1.attn.to_q"), 4096, 4096, a="lora_down", b="lora_up")
+
+    layers = convert(sd).layers
+    assert set(layers) == {f"{NORM_PREFIX}{m}" for m in norms} | {f"{PREFIX}transformer_blocks.1.attn.to_q"}
+    for module in norms:
+        layer = layers[f"{NORM_PREFIX}{module}"]
+        assert isinstance(layer, FullLayer)
+        assert layer.weight.shape == transformer.get_submodule(module).weight.shape
+
+
 def test_a_full_layer_on_gate_up_splits_by_rows() -> None:
     diff = torch.randn(8, 6)
     layers = convert({"diffusion_model.transformer_blocks.0.img_mlp.gate_up.diff": diff}).layers
@@ -144,6 +163,12 @@ def test_a_gate_up_layer_that_cannot_be_split_is_refused(gate_up_layer: dict) ->
     sd = {f"diffusion_model.transformer_blocks.0.img_mlp.gate_up.{k}": v for k, v in gate_up_layer.items()}
     with pytest.raises(ValueError, match="gate_up"):
         convert(sd)
+
+
+def test_a_low_rank_layer_on_a_norm_is_refused() -> None:
+    # A norm has no matrix to factor; only a full diff of its weight applies.
+    with pytest.raises(ValueError, match="norm_q"):
+        convert(_pair("diffusion_model.transformer_blocks.0.attn.norm_q", 128, 128))
 
 
 def test_a_lora_with_layers_this_model_lacks_is_refused_whole() -> None:

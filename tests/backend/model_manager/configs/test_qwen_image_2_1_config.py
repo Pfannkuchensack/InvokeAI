@@ -85,6 +85,16 @@ def test_an_nvfp4_file_is_refused_at_install() -> None:
         _identify(sd, Path("qwen_image_2.1_nvfp4.safetensors"))
 
 
+def test_a_lora_with_norm_diffs_is_qwen_image_2_1(tmp_path: Path) -> None:
+    # ComfyUI's Turbo LoRA: besides the Linears, full diffs on the q/k norms and the text norm.
+    sd = _comfy_gate_up_lora() | {
+        "diffusion_model.transformer_blocks.1.attn.norm_q.diff": torch.zeros(128),
+        "diffusion_model.transformer_blocks.1.attn.norm_k.diff": torch.zeros(128),
+        "diffusion_model.txt_in.text_norm.diff": torch.zeros(4096),
+    }
+    assert _probe(LoRA_LyCORIS_QwenImage21_Config, sd, tmp_path)
+
+
 def test_a_torchao_file_is_refused_at_install() -> None:
     # unsloth's FP8 build: torchao Float8Tensors, saved as the payload and a per-row scale, no `.weight`.
     layer = "transformer_blocks.0.attn.to_q"
@@ -173,7 +183,72 @@ def test_a_lora_on_the_gated_mlp_is_qwen_image_2_1(tmp_path: Path) -> None:
         assert _probe(LoRA_LyCORIS_QwenImage21_Config, sd, tmp_path)
 
 
-@pytest.mark.parametrize("sd", [_comfy_gate_up_lora(), _attention_lora(4096)], ids=["gate_up", "attention"])
+_SHAPES = {"attn.to_out.0": (4096, 4096), "img_mlp.proj": (12288, 4096), "img_mlp.out": (4096, 12288)}
+
+
+def _lora_on(*modules: str, kohya: bool = False) -> dict[str, torch.Tensor]:
+    """A low-rank LoRA on the given block modules only, in diffusers/PEFT or Kohya naming."""
+    sd: dict[str, torch.Tensor] = {}
+    for module in modules:
+        out_features, in_features = _SHAPES[module]
+        name = f"transformer_blocks.0.{module}"
+        if kohya:
+            prefix, down, up = "lora_unet_" + name.replace(".", "_"), "lora_down", "lora_up"
+        else:
+            prefix, down, up = f"transformer.{name}", "lora_A", "lora_B"
+        sd[f"{prefix}.{down}.weight"] = torch.zeros(4, in_features)
+        sd[f"{prefix}.{up}.weight"] = torch.zeros(out_features, 4)
+    return sd
+
+
+_OUTPUT_OR_MLP = {
+    # No to_q/to_k/to_v and no gate_up: the attention output is told apart by its width, the MLP halves by name.
+    "attention-output": _lora_on("attn.to_out.0"),
+    "mlp-halves": _lora_on("img_mlp.proj", "img_mlp.out"),
+    "mlp-halves-kohya": _lora_on("img_mlp.proj", "img_mlp.out", kohya=True),
+}
+
+
+def _attention_lokr(width: int, split_w2: bool = False) -> dict[str, torch.Tensor]:
+    """An attention-only LoKR: the weight is kron(w1, w2), so its input width is 4 x w2's. LyCORIS usually keeps
+    w1 whole and stores w2 as a low-rank pair, w2_a @ w2_b."""
+    prefix = "transformer.transformer_blocks.0.attn.to_q"
+    sd = {f"{prefix}.lokr_w1": torch.zeros(4, 4)}
+    if split_w2:
+        sd[f"{prefix}.lokr_w2_a"] = torch.zeros(width // 4, 8)
+        sd[f"{prefix}.lokr_w2_b"] = torch.zeros(8, width // 4)
+    else:
+        sd[f"{prefix}.lokr_w2"] = torch.zeros(width // 4, width // 4)
+    return sd
+
+
+@pytest.mark.parametrize("sd", _OUTPUT_OR_MLP.values(), ids=_OUTPUT_OR_MLP.keys())
+def test_a_lora_on_the_attention_output_or_the_mlp_halves_is_qwen_image_2_1(
+    sd: dict[str, torch.Tensor], tmp_path: Path
+) -> None:
+    assert not _probe(LoRA_LyCORIS_QwenImage_Config, sd, tmp_path)
+    assert _probe(LoRA_LyCORIS_QwenImage21_Config, sd, tmp_path)
+
+
+@pytest.mark.parametrize("split_w2", [False, True], ids=["whole", "split-w2"])
+def test_an_attention_only_lokr_is_told_apart_by_its_width(split_w2: bool, tmp_path: Path) -> None:
+    assert _probe(LoRA_LyCORIS_QwenImage_Config, _attention_lokr(3072, split_w2), tmp_path)
+    # Not Qwen-Image's; and as a LoKR, not installable as Qwen-Image-2.1's either: it is left unknown.
+    assert not _probe(LoRA_LyCORIS_QwenImage_Config, _attention_lokr(4096, split_w2), tmp_path)
+    assert not _probe(LoRA_LyCORIS_QwenImage21_Config, _attention_lokr(4096, split_w2), tmp_path)
+    # A factored width is weaker evidence: beside a module only Qwen-Image has, it stays Qwen-Image's.
+    with_qwen_image_mlp = _attention_lokr(4096) | {
+        "transformer.transformer_blocks.0.img_mlp.net.0.proj.lokr_w1": torch.zeros(4, 4),
+        "transformer.transformer_blocks.0.img_mlp.net.0.proj.lokr_w2": torch.zeros(3072, 768),
+    }
+    assert _probe(LoRA_LyCORIS_QwenImage_Config, with_qwen_image_mlp, tmp_path)
+
+
+@pytest.mark.parametrize(
+    "sd",
+    [_comfy_gate_up_lora(), _attention_lora(4096), *_OUTPUT_OR_MLP.values()],
+    ids=["gate_up", "attention", *_OUTPUT_OR_MLP.keys()],
+)
 def test_a_qwen_image_2_1_lora_is_claimed_by_no_other_lora_config(sd: dict[str, torch.Tensor], tmp_path: Path) -> None:
     # Identification tries every config; two that accept one file leave the outcome to iteration order.
     others = [

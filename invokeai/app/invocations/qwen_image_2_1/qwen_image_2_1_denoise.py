@@ -29,6 +29,7 @@ from invokeai.backend.flux.sampling_utils import clip_timestep_schedule_fraction
 from invokeai.backend.model_manager.taxonomy import BaseModelType, ModelFormat
 from invokeai.backend.patches.layer_patcher import LayerPatcher, PatchSpec
 from invokeai.backend.patches.lora_conversions.qwen_image_2_1_lora_conversion_utils import (
+    QWEN_IMAGE_21_LORA_NORM_PREFIX,
     QWEN_IMAGE_21_LORA_TRANSFORMER_PREFIX,
 )
 from invokeai.backend.patches.model_patch_raw import ModelPatchRaw
@@ -392,6 +393,17 @@ class QwenImage21DenoiseInvocation(BaseInvocation, WithMetadata, WithBoard):
                     dtype=dtype,
                     cached_weights=cached_weights,
                     force_sidecar_patching=requires_sidecar_patching(transformer, transformer_config.format),
+                )
+            )
+            # Norm diffs are merged in every format: norms are never quantized, and no sidecar wraps them.
+            exit_stack.enter_context(
+                LayerPatcher.apply_smart_model_patches(
+                    model=transformer,
+                    patches=self._lora_iterator(context),
+                    prefix=QWEN_IMAGE_21_LORA_NORM_PREFIX,
+                    dtype=dtype,
+                    cached_weights=cached_weights,
+                    force_direct_patching=True,
                 )
             )
             # One cache per guidance branch, for this run only. The prefix it holds is computed with the LoRAs.

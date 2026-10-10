@@ -4,12 +4,17 @@ The published LoRAs target the module names diffusers uses, under a `diffusion_m
 (diffusers/PEFT) or `lora_unet_` (Kohya, flattened) prefix -- with one exception: ComfyUI fuses each block's gated
 MLP input into `img_mlp.gate_up`, which diffusers keeps as `gate_layer` (the first half of its output rows) and
 `proj` (the second half), as the base checkpoint converter splits it.
+
+Besides the Linears, a LoRA may carry full `diff`s on the RMSNorm weights (the official Turbo LoRA does). They are
+merged into the weight whatever the transformer's format: a norm is never quantized, and a sidecar cannot patch it.
 """
 
 import re
 from typing import Any
 
 QWEN_IMAGE_21_LORA_TRANSFORMER_PREFIX = "lora_transformer-"
+# The norm diffs, kept apart so the denoise node can merge them while the Linears run as sidecars.
+QWEN_IMAGE_21_LORA_NORM_PREFIX = "lora_transformer_norm-"
 
 # Longest first, so `base_model.model.transformer.` wins over `base_model.model.`.
 _PREFIXES = ("base_model.model.transformer.", "base_model.model.", "diffusion_model.", "transformer.")
@@ -45,6 +50,9 @@ _BLOCK_MODULES = frozenset(
         "img_mlp.out",
     }
 )
+# The RMSNorm weights a full diff may target.
+_BLOCK_NORMS = frozenset({"attn.norm_q", "attn.norm_k"})
+_TOP_NORMS = frozenset({"txt_in.text_norm"})
 _TOP_MODULES = frozenset(
     {
         "img_in",
@@ -60,8 +68,8 @@ _TOP_MODULES = frozenset(
 _BLOCK = re.compile(r"transformer_blocks\.(\d+)\.(.+)")
 # Kohya flattens the dots, which makes a name ambiguous on its own (`to_out_0`), so it is mapped, not re-dotted.
 _KOHYA_BLOCK = re.compile(r"transformer_blocks_(\d+)_(.+)")
-_KOHYA_BLOCK_MODULES = {module.replace(".", "_"): module for module in _BLOCK_MODULES}
-_KOHYA_TOP_MODULES = {module.replace(".", "_"): module for module in _TOP_MODULES}
+_KOHYA_BLOCK_MODULES = {module.replace(".", "_"): module for module in _BLOCK_MODULES | _BLOCK_NORMS}
+_KOHYA_TOP_MODULES = {module.replace(".", "_"): module for module in _TOP_MODULES | _TOP_NORMS}
 _KOHYA_PREFIX = "lora_unet_"
 
 GATE_UP = "img_mlp.gate_up"
@@ -90,8 +98,15 @@ def _module_path(name: str) -> str | None:
             return f"transformer_blocks.{block.group(1)}.{module}" if module else None
         return _KOHYA_TOP_MODULES.get(flat)
     if block := _BLOCK.fullmatch(name):
-        return name if block.group(2) in _BLOCK_MODULES else None
-    return name if name in _TOP_MODULES else None
+        return name if block.group(2) in _BLOCK_MODULES | _BLOCK_NORMS else None
+    return name if name in _TOP_MODULES | _TOP_NORMS else None
+
+
+def is_norm(module: str) -> bool:
+    """Whether a module path from `split_key` names an RMSNorm rather than a Linear."""
+    if block := _BLOCK.fullmatch(module):
+        return block.group(2) in _BLOCK_NORMS
+    return module in _TOP_NORMS
 
 
 def split_key(key: str) -> tuple[str, str] | None:
@@ -106,8 +121,8 @@ def split_key(key: str) -> tuple[str, str] | None:
 def unsupported_keys(state_dict: dict[str | int, Any]) -> list[str]:
     """The keys that keep this state dict from being applied to Qwen-Image-2.1 as a whole.
 
-    A key that names no module of this transformer (another model's, or a text encoder's), and a fused gate_up
-    layer that cannot be split. Empty for a LoRA that applies in full.
+    A key that names no module of this transformer (another model's, or a text encoder's), anything but a full
+    `diff` on a norm, and a fused gate_up layer that cannot be split. Empty for a LoRA that applies in full.
     """
     unsupported: list[str] = []
     gate_up_layers: dict[str, set[str]] = {}
@@ -116,7 +131,9 @@ def unsupported_keys(state_dict: dict[str | int, Any]) -> list[str]:
             unsupported.append(str(key))
             continue
         module, value_key = split
-        if module.endswith(GATE_UP):
+        if is_norm(module) and value_key != "diff":
+            unsupported.append(key)
+        elif module.endswith(GATE_UP):
             gate_up_layers.setdefault(module, set()).add(value_key)
     unsupported += [module for module, values in gate_up_layers.items() if frozenset(values) not in GATE_UP_SPLITTABLE]
     return sorted(unsupported)

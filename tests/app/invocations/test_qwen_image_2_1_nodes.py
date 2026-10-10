@@ -10,6 +10,8 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 import torch
+from diffusers.models.normalization import RMSNorm as DiffusersRMSNorm
+from diffusers.models.transformers.transformer_qwenimage21 import QwenImage21ZeroCenterRMSNorm
 from PIL import Image
 
 from invokeai.app.invocations.fields import ImageField, LatentsField, QwenImage21ConditioningField
@@ -636,7 +638,7 @@ def test_a_qwen_image_lora_is_refused(node_class: str) -> None:
 
 
 class _LinearTransformer(torch.nn.Module):
-    """A transformer with one real Linear a LoRA can target, reading it on every forward."""
+    """A transformer with one real Linear and one real norm a LoRA can target, reading both on every forward."""
 
     config = SimpleNamespace(causal_condition=True, num_attention_heads=2, attention_head_dim=4)
 
@@ -646,13 +648,21 @@ class _LinearTransformer(torch.nn.Module):
         block.attn = torch.nn.Module()
         block.attn.to_q = torch.nn.Linear(8, 8, bias=False)
         torch.nn.init.zeros_(block.attn.to_q.weight)
+        block.attn.norm_q = DiffusersRMSNorm(8, eps=1e-6)
         self.transformer_blocks = torch.nn.ModuleList([block])
+        # The text norm has no custom wrapper, so only a forced direct patch can reach it.
+        self.txt_in = torch.nn.Module()
+        self.txt_in.text_norm = QwenImage21ZeroCenterRMSNorm(8)
         self.seen: list[tuple[str | None, torch.Tensor]] = []
+        self.norm_seen: list[torch.Tensor] = []
+        self.text_norm_seen: list[torch.Tensor] = []
 
     def forward(self, *, hidden_states, encoder_hidden_states, kv_cache_mode, **_kwargs):
         to_q = self.transformer_blocks[0].attn.to_q
         self.seen.append((kv_cache_mode, to_q(torch.ones(1, 8)).detach().clone()))
         self.weight_was_patched = bool(to_q.weight.any())
+        self.norm_seen.append(self.transformer_blocks[0].attn.norm_q.weight.detach().clone())
+        self.text_norm_seen.append(self.txt_in.text_norm.weight.detach().clone())
         return (torch.zeros(1, encoder_hidden_states.shape[1] + hidden_states.shape[1], hidden_states.shape[2]),)
 
 
@@ -678,6 +688,8 @@ def test_loras_reach_the_transformer_from_the_first_step_and_leave_it_unchanged(
         {
             "diffusion_model.transformer_blocks.0.attn.to_q.lora_A.weight": down,
             "diffusion_model.transformer_blocks.0.attn.to_q.lora_B.weight": up,
+            "diffusion_model.transformer_blocks.0.attn.norm_q.diff": torch.full((8,), 0.25),
+            "diffusion_model.txt_in.text_norm.diff": torch.full((8,), -0.5),
         }
     )
     lora_info = SimpleNamespace(model=patch, model_in_ram=nullcontext)
@@ -701,6 +713,13 @@ def test_loras_reach_the_transformer_from_the_first_step_and_leave_it_unchanged(
     # Merged into the weight for a plain model; beside it, the weight untouched, for a GGUF one.
     assert transformer.weight_was_patched is (model_format is ModelFormat.Diffusers)
     assert not transformer.transformer_blocks[0].attn.to_q.weight.any()
+    # A norm diff is merged in both, as no sidecar patches a norm, and taken back out afterwards.
+    for weight in transformer.norm_seen:
+        torch.testing.assert_close(weight, torch.full((8,), 1.125))
+    for weight in transformer.text_norm_seen:
+        torch.testing.assert_close(weight, torch.full((8,), -0.25))
+    assert torch.equal(transformer.transformer_blocks[0].attn.norm_q.weight, torch.ones(8))
+    assert not transformer.txt_in.text_norm.weight.any()
 
 
 def test_loras_reserve_room_only_where_they_run_beside_the_weights() -> None:
