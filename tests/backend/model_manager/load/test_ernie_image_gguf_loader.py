@@ -23,7 +23,11 @@ from invokeai.backend.model_manager.load.model_loaders.ernie_image import ErnieI
 from invokeai.backend.model_manager.model_on_disk import ModelOnDisk
 from invokeai.backend.model_manager.taxonomy import SubModelType
 from invokeai.backend.quantization.gguf.ggml_tensor import GGMLTensor
-from tests.backend.model_manager.load.ernie_image_gguf_fixture import TINY_CONFIG, write_ernie_image_gguf
+from tests.backend.model_manager.load.ernie_image_gguf_fixture import (
+    K_QUANT_CONFIG,
+    TINY_CONFIG,
+    write_ernie_image_gguf,
+)
 from tests.fixtures.loader_seams import Seam, prepare
 
 SEAM = Seam(
@@ -65,46 +69,52 @@ def test_a_safetensors_single_file_is_not_claimed_as_gguf(tmp_path: Path) -> Non
     assert isinstance(result.config, Main_Checkpoint_ErnieImage_Config)
 
 
-def _load(monkeypatch, tmp_path: Path, qtype: gguf.GGMLQuantizationType):
+def _load(monkeypatch, tmp_path: Path, qtype: gguf.GGMLQuantizationType, geometry: dict = TINY_CONFIG):
     path = tmp_path / f"ernie-image-turbo-{qtype.name}.gguf"
-    meant = write_ernie_image_gguf(path, qtype=qtype)
+    meant = write_ernie_image_gguf(path, qtype=qtype, config=geometry)
     config = Main_GGUF_ErnieImage_Config.model_construct(path=str(path), name="ernie-image-turbo")
     run = prepare(
         SEAM,
         monkeypatch,
-        geometry=lambda patch: patch.setattr(ernie_image, "ERNIE_IMAGE_TRANSFORMER_CONFIG", TINY_CONFIG),
+        geometry=lambda patch: patch.setattr(ernie_image, "ERNIE_IMAGE_TRANSFORMER_CONFIG", geometry),
     )
     return run.load(config, SubModelType.Transformer), meant, run
 
 
-def _forward(model: torch.nn.Module) -> torch.Tensor:
+def _forward(model: torch.nn.Module, geometry: dict = TINY_CONFIG) -> torch.Tensor:
     generator = torch.Generator().manual_seed(1)
     with torch.no_grad():
         return model(
-            hidden_states=torch.randn(1, TINY_CONFIG["in_channels"], 2, 2, generator=generator),
+            hidden_states=torch.randn(1, geometry["in_channels"], 2, 2, generator=generator),
             timestep=torch.tensor([500.0]),
-            text_bth=torch.randn(1, 3, TINY_CONFIG["text_in_dim"], generator=generator),
+            text_bth=torch.randn(1, 3, geometry["text_in_dim"], generator=generator),
             text_lens=torch.tensor([3]),
             return_dict=False,
         )[0]
 
 
 @pytest.mark.parametrize(
-    "qtype",
-    [gguf.GGMLQuantizationType.Q8_0, gguf.GGMLQuantizationType.Q5_1, gguf.GGMLQuantizationType.Q4_0],
-    ids=lambda qtype: qtype.name,
+    ("qtype", "geometry"),
+    [
+        (gguf.GGMLQuantizationType.Q8_0, TINY_CONFIG),
+        (gguf.GGMLQuantizationType.Q5_1, TINY_CONFIG),
+        (gguf.GGMLQuantizationType.Q4_0, TINY_CONFIG),
+        # What the Q4_K_M starters mostly hold; its super-blocks need the 256-wide geometry.
+        (gguf.GGMLQuantizationType.Q4_K, K_QUANT_CONFIG),
+    ],
+    ids=["Q8_0", "Q5_1", "Q4_0", "Q4_K"],
 )
-def test_the_gguf_transformer_computes_what_its_file_means(monkeypatch, tmp_path, qtype) -> None:
+def test_the_gguf_transformer_computes_what_its_file_means(monkeypatch, tmp_path, qtype, geometry) -> None:
     """Not bit-exact: the torch kernels multiply codes by their fp16 block scale in fp16, the reference
     reader in float32. A dropped norm, an unconverted convolution or a wrong key is off by far more."""
     from diffusers import ErnieImageTransformer2DModel
 
-    model, meant, _ = _load(monkeypatch, tmp_path, qtype)
+    model, meant, _ = _load(monkeypatch, tmp_path, qtype, geometry)
     apply_custom_layers_to_model(model)
-    reference = ErnieImageTransformer2DModel(**TINY_CONFIG)
+    reference = ErnieImageTransformer2DModel(**geometry)
     reference.load_state_dict(meant)
 
-    assert torch.allclose(_forward(model), _forward(reference), atol=1e-3, rtol=1e-3)
+    assert torch.allclose(_forward(model, geometry), _forward(reference, geometry), atol=1e-3, rtol=1e-3)
 
 
 def test_only_the_quantized_linears_stay_packed(monkeypatch, tmp_path) -> None:

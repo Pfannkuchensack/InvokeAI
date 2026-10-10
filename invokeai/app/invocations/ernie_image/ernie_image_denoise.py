@@ -232,12 +232,12 @@ class ErnieImageDenoiseInvocation(BaseInvocation):
         model_path = (context.config.get().models_path / config.path).resolve()
         scheduler_dir = model_path / "scheduler"
         if not scheduler_dir.is_dir():
-            # A single-file checkpoint has no `scheduler/` by construction -- `config.path` is the
-            # file itself -- so there is nothing to read and nothing worth warning about. What
+            # A single file (safetensors or GGUF) has no `scheduler/` by construction -- `config.path`
+            # is the file itself -- so only a Diffusers folder missing one is worth warning about. What
             # matters is the value: both released pipelines ship `shift=4.0`, and the driver hands
             # the scheduler raw sigmas expecting it to apply that shift, so default-constructing
             # would silently denoise on the unshifted schedule. Turbo feels it worst at 8 steps.
-            if config.format is not ModelFormat.Checkpoint:
+            if config.format is ModelFormat.Diffusers:
                 context.logger.warning(
                     f"No scheduler config found at {scheduler_dir}; using {scheduler_cls.__name__} "
                     f"with the released ERNIE-Image shift={ERNIE_IMAGE_SHIFT}."
