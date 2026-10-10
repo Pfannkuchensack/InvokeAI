@@ -20,6 +20,7 @@ import {
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { isManagedGalleryBoard } from './galleryBoardGroups';
 import { useGalleryWidget } from './GalleryWidgetContext';
 
 export interface GalleryBoardMenuTarget {
@@ -47,10 +48,7 @@ export const GalleryBoardMenu = ({
   targetRef.current = target;
 
   const board = target?.board ?? null;
-  // An inbox is renamed, archived and deleted through its project; every other real board is the user's to manage.
-  // The active project's own inbox is also checked by id, because a draft project's inbox can predate the listing.
-  const isManagedBoard =
-    board !== null && board.kind === 'board' && !board.isInbox && board.id !== gallery.projectBoardId;
+  const isManagedBoard = board !== null && isManagedGalleryBoard(board, gallery.projectBoardId);
   const positioning = useMemo(
     () => ({
       getAnchorRect: () => {
