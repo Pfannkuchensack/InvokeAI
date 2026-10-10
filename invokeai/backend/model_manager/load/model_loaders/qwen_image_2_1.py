@@ -81,7 +81,12 @@ class QwenImage21DiffusersModel(GenericDiffusersLoader):
         if submodel_type is SubModelType.Tokenizer:
             return AutoTokenizer.from_pretrained(model_path / "processor", local_files_only=True)
 
-        dtype = TorchDevice.choose_bfloat16_safe_dtype(TorchDevice.choose_torch_device())
+        if submodel_type is SubModelType.VAE:
+            # The configured precision, except float16, which is unstable on this autoencoder: bfloat16 where the
+            # device has it, float32 otherwise.
+            dtype = self._torch_dtype_avoiding_float16()
+        else:
+            dtype = TorchDevice.choose_bfloat16_safe_dtype(TorchDevice.choose_torch_device())
         repo_variant = config.repo_variant if isinstance(config, Diffusers_Config_Base) else None
         variant = repo_variant.value if repo_variant else None
         if submodel_type is SubModelType.TextEncoder:

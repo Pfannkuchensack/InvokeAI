@@ -1,5 +1,6 @@
 """Qwen-Image-2.1's RGBA VAE: how a decode becomes an image, what an encode reads, and the tile geometry it runs in."""
 
+import numpy as np
 import pytest
 import torch
 from diffusers import AutoencoderKLQwenImage21
@@ -42,12 +43,15 @@ def test_a_transparent_background_is_kept() -> None:
     assert image.getpixel((0, 0))[3] == 0 and image.getpixel((63, 0))[3] == 255
 
 
-def test_values_map_like_the_pipelines_postprocess() -> None:
-    # (x / 2 + 0.5) * 255, rounded: -1 -> 0, 0 -> 128 (127.5 rounds to even), 1 -> 255.
-    decoded = torch.tensor([-1.0, 0.0, 1.0]).view(1, 1, 3).expand(4, 1, 3).clone()
+@pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float32])
+def test_values_map_exactly_as_the_pipelines_postprocess(dtype: torch.dtype) -> None:
+    from diffusers.image_processor import VaeImageProcessor
+
+    generator = torch.Generator().manual_seed(0)
+    decoded = (torch.rand(4, 64, 64, generator=generator) * 2.4 - 1.2).to(dtype)
     decoded[3] = 1.0
-    image = to_image(decoded)
-    assert [image.getpixel((x, 0)) for x in range(3)] == [(0, 0, 0), (128, 128, 128), (255, 255, 255)]
+    expected = VaeImageProcessor(vae_scale_factor=16).postprocess(decoded[None], output_type="pil")[0]
+    assert np.array_equal(np.asarray(to_image(decoded)), np.asarray(expected.convert("RGB")))
 
 
 def test_an_encode_ignores_the_images_alpha() -> None:
@@ -108,3 +112,33 @@ def test_nothing_is_tiled_unless_asked_or_too_large(monkeypatch: pytest.MonkeyPa
 def test_a_tile_size_field_below_the_floor_is_raised_to_it() -> None:
     assert choose_tile_size(2048, 2048, 2, CPU, tiled=True, tile_size=16, auto_tile=False) == MIN_TILE_SIZE
     assert choose_tile_size(2048, 2048, 2, CPU, tiled=True, tile_size=768, auto_tile=False) == 768
+
+
+@pytest.mark.parametrize(
+    ("precision", "expected"),
+    [(torch.float16, torch.bfloat16), (torch.bfloat16, torch.bfloat16), (torch.float32, torch.float32)],
+)
+def test_the_pipelines_vae_loads_at_the_configured_precision_but_never_float16(
+    precision: torch.dtype, expected: torch.dtype, tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+
+    from invokeai.backend.model_manager.load.model_loaders.qwen_image_2_1 import QwenImage21DiffusersModel
+    from invokeai.backend.model_manager.taxonomy import SubModelType
+
+    loaded: dict[str, torch.dtype] = {}
+
+    class _VAE:
+        @staticmethod
+        def from_pretrained(_path, *, torch_dtype, **_kwargs):
+            loaded["dtype"] = torch_dtype
+            return torch.nn.Identity()
+
+    loader = object.__new__(QwenImage21DiffusersModel)
+    loader._torch_dtype = precision
+    loader._torch_device = torch.device("cpu")
+    monkeypatch.setattr(loader, "get_hf_load_class", lambda *_args: _VAE)
+
+    loader._load_model(SimpleNamespace(path=str(tmp_path)), SubModelType.VAE)
+
+    assert loaded["dtype"] is expected

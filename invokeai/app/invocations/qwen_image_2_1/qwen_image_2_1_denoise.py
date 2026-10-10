@@ -232,7 +232,11 @@ class QwenImage21DenoiseInvocation(BaseInvocation, WithMetadata, WithBoard):
         neg_img_mask = image_slot_mask(neg_embeds.shape[1]) if neg_embeds is not None else None
 
         working_memory = self._estimate_working_memory(
-            image_seq_len, pos_embeds.shape[1], None if neg_embeds is None else neg_embeds.shape[1], do_cfg
+            image_seq_len,
+            pos_embeds.shape[1],
+            None if neg_embeds is None else neg_embeds.shape[1],
+            do_cfg,
+            dtype.itemsize,
         )
         working_memory += self._attention_score_bytes(
             transformer_info.model,
@@ -316,19 +320,23 @@ class QwenImage21DenoiseInvocation(BaseInvocation, WithMetadata, WithBoard):
         return unpack_latents(latents, latent_height, latent_width).float()
 
     @staticmethod
-    def _estimate_working_memory(image_seq_len: int, pos_text_len: int, neg_text_len: int | None, do_cfg: bool) -> int:
+    def _estimate_working_memory(
+        image_seq_len: int, pos_text_len: int, neg_text_len: int | None, do_cfg: bool, element_size: int
+    ) -> int:
         """Peak transformer activations, in bytes, for the model cache to keep free.
 
         Measured on an RTX 4090 in bf16 with the transformer fully resident: 0.55 GiB of activations at
         1024x1024 (4096 image tokens) and 2.2 GiB at 2048x2048 (16384), about 0.14 MiB per token. 0.25 MiB per
         token plus a 1 GiB base leaves room for the allocator and the prefix cache, which holds K and V of every
-        text token in all 32 blocks (~0.5 MiB per text token, per guidance branch).
+        text token in all 32 blocks (~0.5 MiB per text token, per guidance branch). Both per-token terms are bf16
+        figures and scale with `element_size`, the compute dtype's width: a float32 fallback needs twice as much.
         """
         mib, gib = 1024**2, 1024**3
+        width = element_size / 2
         text_len = max(pos_text_len, neg_text_len or 0)
-        estimated = int((image_seq_len + text_len) * 0.25 * mib) + gib
+        estimated = int((image_seq_len + text_len) * 0.25 * mib * width) + gib
         branches = 2 if do_cfg else 1
-        estimated += int(branches * (pos_text_len if neg_text_len is None else text_len) * 0.5 * mib)
+        estimated += int(branches * (pos_text_len if neg_text_len is None else text_len) * 0.5 * mib * width)
         return estimated
 
     @staticmethod

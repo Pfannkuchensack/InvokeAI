@@ -7,6 +7,7 @@ an image-to-image run starts on each variant's schedule, and which components th
 from contextlib import contextmanager
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 import torch
 
@@ -151,6 +152,91 @@ def test_image_to_image_on_turbo_starts_at_the_noise_level_of_its_strength() -> 
     positive = [(mode, t) for prompt, _cache, mode, t in transformer.calls if prompt == "pos"]
     assert positive == [("extract", 0.5), ("cached", 0.415)]
     assert sum(prompt == "neg" for prompt, *_ in transformer.calls) == 2
+
+
+def test_a_float32_fallback_reserves_twice_the_bfloat16_activations() -> None:
+    estimate = QwenImage21DenoiseInvocation._estimate_working_memory
+    base = 1024**3
+    bf16 = estimate(4096, 300, 300, True, 2) - base
+    assert estimate(4096, 300, 300, True, 4) - base == 2 * bf16
+
+
+class _DecodingVAE:
+    """A bf16 VAE that records what it decodes and answers with a fixed opaque bf16 decode."""
+
+    dtype = torch.bfloat16
+    use_tiling = False
+    tile_sample_min_height = tile_sample_min_width = 256
+    tile_sample_stride_height = tile_sample_stride_width = 192
+
+    def __init__(self, mean: list[float], std: list[float]) -> None:
+        self.config = SimpleNamespace(latents_mean=mean, latents_std=std)
+        self.decoded_from: torch.Tensor | None = None
+        generator = torch.Generator().manual_seed(1)
+        self.decode_output = (torch.rand(1, 4, 1, 64, 64, generator=generator) * 2.4 - 1.2).to(torch.bfloat16)
+        self.decode_output[:, 3] = 1.0
+
+    def parameters(self):
+        return iter([torch.zeros(1, dtype=torch.bfloat16)])
+
+    def disable_tiling(self) -> None:
+        self.use_tiling = False
+
+    def decode(self, z: torch.Tensor, return_dict: bool = False):
+        self.decoded_from = z
+        return (self.decode_output,)
+
+
+def test_a_decode_reads_and_writes_exactly_what_the_pipeline_does() -> None:
+    from diffusers.image_processor import VaeImageProcessor
+
+    from invokeai.app.invocations.vae.qwen_image_2_1_latents_to_image import QwenImage21LatentsToImageInvocation
+
+    generator = torch.Generator().manual_seed(0)
+    latents = torch.randn(1, LATENT_CHANNELS, 4, 4, generator=generator)
+    mean = torch.randn(LATENT_CHANNELS, generator=generator).tolist()
+    std = (torch.rand(LATENT_CHANNELS, generator=generator) * 3).tolist()
+    vae = _DecodingVAE(mean, std)
+    saved: list = []
+
+    @contextmanager
+    def on_device(**_kwargs):
+        yield None, vae
+
+    def save(image):
+        saved.append(image)
+        return SimpleNamespace(image_name="out.png", width=image.width, height=image.height)
+
+    context = SimpleNamespace(
+        tensors=SimpleNamespace(load=lambda _name: latents),
+        images=SimpleNamespace(save=save),
+        models=SimpleNamespace(
+            load=lambda _identifier: SimpleNamespace(
+                compute_device=torch.device("cpu"), model=vae, model_on_device=on_device
+            )
+        ),
+        config=SimpleNamespace(get=lambda: SimpleNamespace(force_tiled_decode=False, auto_tiled_decode=False)),
+        util=SimpleNamespace(signal_progress=lambda _message: None),
+    )
+    node = QwenImage21LatentsToImageInvocation.model_construct(
+        latents=LatentsField(latents_name="latents"), vae=SimpleNamespace(vae=None), tiled=False, tile_size=0
+    )
+
+    node.invoke(context)
+
+    # In: the pipeline's order -- latents to bf16, the float32 statistics to bf16, the multiply-add in bf16. In
+    # float32 first, a bf16 decode reads a different input for most elements.
+    bf16_mean = torch.tensor(mean).view(1, -1, 1, 1, 1).to(torch.bfloat16)
+    bf16_std = torch.tensor(std).view(1, -1, 1, 1, 1).to(torch.bfloat16)
+    expected = latents.to(torch.bfloat16).unsqueeze(2) * bf16_std + bf16_mean
+    float32_first = (
+        latents.unsqueeze(2) * torch.tensor(std).view(1, -1, 1, 1, 1) + torch.tensor(mean).view(1, -1, 1, 1, 1)
+    ).to(torch.bfloat16)
+    assert not torch.equal(expected, float32_first)
+    assert torch.equal(vae.decoded_from, expected)
+    # Out: the pixels diffusers' own post-processing makes of the same bf16 decode.
+    pipeline = VaeImageProcessor(vae_scale_factor=16).postprocess(vae.decode_output[:, :, 0], output_type="pil")[0]
+    assert np.array_equal(np.asarray(saved[0]), np.asarray(pipeline.convert("RGB")))
 
 
 def _loader(**fields) -> QwenImage21ModelLoaderInvocation:

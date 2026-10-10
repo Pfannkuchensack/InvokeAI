@@ -1549,14 +1549,19 @@ def _raise_for_unsupported_comfy_quantization(mod: ModelOnDisk, state_dict: dict
     right outcome is a refusal the installer shows, not a fall-through to `Unknown_Config` that
     registers it as a model nothing can load.
 
-    Two of them. nvfp4 packs two codes per byte, so its uint8 weights are indistinguishable from
+    Three of them. torchao's serialized tensor subclasses (unsloth's Qwen-Image-2.1 FP8 build) store each quantized
+    weight as `<layer>._weight_qdata` beside its scale, with no `<layer>.weight` the transformer could load. Only
+    a family whose fingerprint reads unquantized tensors gets here with such a file: Qwen-Image-2.1 does, while an
+    Ideogram 4 build that quantized its fingerprint Linears would not match at all.
+
+    nvfp4 packs two codes per byte, so its uint8 weights are indistinguishable from
     the `comfy_quant` markers every repack carries -- including the two supported ones; the
     per-tensor `weight_scale_2` is what only nvfp4 writes.
 
     And int8 weights *without* a readable `int8_tensorwise` marker: the loader refuses those
     (`reject_unmarked_int8_weights`), because a rotated weight loaded as if it were not one
-    generates noise. Refusing them here too is what keeps that refusal at install time -- a
-    torchao or `int8_dynamic` repack would otherwise register as a multi-GiB model, pull in its
+    generates noise. Refusing them here too is what keeps that refusal at install time -- an
+    `int8_dynamic` repack would otherwise register as a multi-GiB model, pull in its
     starter dependencies, and fail at the first render.
 
     The markers come from the file's header rather than from `state_dict`: identification loads
@@ -1564,6 +1569,11 @@ def _raise_for_unsupported_comfy_quantization(mod: ModelOnDisk, state_dict: dict
     is a header parse plus one seek per marker, and it only happens for a file that has int8
     weights to explain in the first place.
     """
+    if any(isinstance(key, str) and key.endswith("._weight_qdata") for key in state_dict):
+        raise InvalidMatchError(
+            f"this {family} transformer is saved as torchao-quantized tensors (as unsloth's FP8 build is), which "
+            "is not supported. Install the bf16, fp8_scaled or int8_convrot build, or a GGUF, instead."
+        )
     if any(isinstance(key, str) and key.endswith(".weight_scale_2") for key in state_dict):
         raise InvalidMatchError(
             f"this is an nvfp4-quantized {family} transformer, which is not supported yet. "

@@ -83,8 +83,13 @@ _MAX_TRANSPARENT_FRACTION = 0.001
 
 
 def to_image(decoded: torch.Tensor) -> Image.Image:
-    """A `(4, H, W)` decode in [-1, 1] as an RGB image when it is opaque, RGBA when it is not."""
-    pixels = ((decoded.float().clamp(-1, 1) + 1) * 127.5).round().to(torch.uint8).permute(1, 2, 0).cpu().numpy()
+    """A `(4, H, W)` decode in [-1, 1] as an RGB image when it is opaque, RGBA when it is not.
+
+    Mapped to [0, 1] in the decode's own dtype and only then widened, as the pipeline's `VaeImageProcessor` does:
+    from a bf16 decode, widening first rounds 1 in ~8 % of pixels the other way.
+    """
+    unit = (decoded * 0.5 + 0.5).clamp(0, 1).float()
+    pixels = (unit * 255).round().to(torch.uint8).permute(1, 2, 0).cpu().numpy()
     alpha = pixels[..., 3]
     if np.count_nonzero(alpha < _OPAQUE_ALPHA) <= _MAX_TRANSPARENT_FRACTION * alpha.size:
         return Image.fromarray(np.ascontiguousarray(pixels[..., :3]), mode="RGB")

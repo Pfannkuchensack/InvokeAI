@@ -84,6 +84,19 @@ def test_an_nvfp4_file_is_refused_at_install() -> None:
         _identify(sd, Path("qwen_image_2.1_nvfp4.safetensors"))
 
 
+def test_a_torchao_file_is_refused_at_install() -> None:
+    # unsloth's FP8 build: torchao Float8Tensors, saved as the payload and a per-row scale, no `.weight`.
+    layer = "transformer_blocks.0.attn.to_q"
+    sd = _transformer(
+        **{
+            f"{layer}._weight_qdata": torch.zeros(8, 8, dtype=torch.float8_e4m3fn),
+            f"{layer}._weight_scale": torch.ones(8, 1),
+        }
+    )
+    with pytest.raises(InvalidMatchError, match="torchao"):
+        _identify(sd, Path("Qwen-Image-2.1-FP8.safetensors"))
+
+
 def _int8_gate_up(marker: dict | None) -> dict[str, Any]:
     layer = "model.diffusion_model.transformer_blocks.0.img_mlp.gate_up"
     sd: dict[str, Any] = {

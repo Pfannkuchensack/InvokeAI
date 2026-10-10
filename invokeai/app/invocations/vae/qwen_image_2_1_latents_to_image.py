@@ -51,11 +51,13 @@ class QwenImage21LatentsToImageInvocation(BaseInvocation, WithMetadata, WithBoar
 
         with vae_info.model_on_device(working_mem_bytes=working_memory) as (_, vae):
             context.util.signal_progress("Running VAE")
-            # Denormalize in fp32, then cast to the VAE's dtype. The device is the VAE's configured one, not the
-            # residency of its weights, which partial loading may have moved to the CPU.
-            mean = torch.tensor(vae.config.latents_mean, device=device).view(1, -1, 1, 1, 1)
-            std = torch.tensor(vae.config.latents_std, device=device).view(1, -1, 1, 1, 1)
-            z = (latents.to(device=device, dtype=torch.float32).unsqueeze(2) * std + mean).to(vae.dtype)
+            # Denormalized in the VAE's dtype, as the pipeline does: the latents cast first, the float32 statistics
+            # cast to them, so a bf16 decode reads the same input as the pipeline's. The device is the VAE's
+            # configured one, not the residency of its weights, which partial loading may have moved to the CPU.
+            z = latents.to(device=device, dtype=vae.dtype).unsqueeze(2)
+            mean = torch.tensor(vae.config.latents_mean).view(1, -1, 1, 1, 1).to(device, z.dtype)
+            std = torch.tensor(vae.config.latents_std).view(1, -1, 1, 1, 1).to(device, z.dtype)
+            z = z * std + mean
             TorchDevice.empty_cache()
             with torch.inference_mode(), patch_qwen_image_vae_tiling(vae, tile_size, SPATIAL_SCALE):
                 decoded = vae.decode(z, return_dict=False)[0][0, :, 0]
