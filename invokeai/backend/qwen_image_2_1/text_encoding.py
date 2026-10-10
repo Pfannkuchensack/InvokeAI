@@ -12,6 +12,16 @@ SYSTEM_BLOCK = f"<|im_start|>system\n{SYSTEM_PROMPT}<|im_end|>\n"
 # checkpoint was trained on this one.
 T2I_TEMPLATE = SYSTEM_BLOCK + "<|im_start|>user\n{}<|im_end|>\n<|im_start|>assistant\n"
 IMAGE_PAD = "<|image_pad|>"
+# Pixels per side of one vision token: 16px patches, merged 2x2.
+_PIXELS_PER_TOKEN = 32
+
+# What one encode needs above the weights for a sequence of T tokens, measured on an RTX 4090 (torch 2.13,
+# transformers 5.10): ~286 B * T^2 + 224 KiB * T at peak. The quadratic term is the language model's attention,
+# which SDPA runs on its math kernel for grouped-query heads; four 1-megapixel references (~4.1k tokens) need
+# ~5.4 GiB. The allocator reserves about a fifth more than it hands out.
+_BYTES_PER_TOKEN_PAIR = 286
+_BYTES_PER_TOKEN = 224 * 1024
+_RESERVED_OVER_ALLOCATED = 1.25
 
 
 def format_prompt(prompt: str, num_images: int = 0) -> str:
@@ -19,6 +29,20 @@ def format_prompt(prompt: str, num_images: int = 0) -> str:
     placeholders = " ".join(f"<image{i}><|vision_start|>{IMAGE_PAD}<|vision_end|>" for i in range(1, num_images + 1))
     # Qwen has no BOS token, so an empty prompt would leave the encoder nothing to read.
     return T2I_TEMPLATE.format(placeholders + (prompt or " "))
+
+
+def sequence_length(tokenizer, prompt: str, images: Sequence[Image.Image] = ()) -> int:
+    """Tokens the encoder reads: the formatted prompt, each reference's placeholder one token per 32x32 pixels.
+
+    `images` are the references at `vae.reference_size`, which the image processor leaves at their size.
+    """
+    text = len(tokenizer(format_prompt(prompt, len(images))).input_ids) - len(images)
+    return text + sum((w // _PIXELS_PER_TOKEN) * (h // _PIXELS_PER_TOKEN) for w, h in (i.size for i in images))
+
+
+def working_memory_bytes(num_tokens: int) -> int:
+    """Device memory an encode of `num_tokens` tokens needs above the encoder's weights."""
+    return int((_BYTES_PER_TOKEN_PAIR * num_tokens**2 + _BYTES_PER_TOKEN * num_tokens) * _RESERVED_OVER_ALLOCATED)
 
 
 def system_prefix_length(tokenizer) -> int:

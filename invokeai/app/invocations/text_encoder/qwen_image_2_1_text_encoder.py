@@ -10,7 +10,12 @@ from invokeai.app.services.shared.invocation_context import InvocationContext
 from invokeai.backend.model_manager.load.model_cache.utils import get_effective_device
 from invokeai.backend.model_manager.taxonomy import BaseModelType, ModelFormat, ModelType, SubModelType
 from invokeai.backend.quantization.dequantizing_linear import peak_dequant_transient_bytes
-from invokeai.backend.qwen_image_2_1.text_encoding import encode_prompt, has_vision_tower
+from invokeai.backend.qwen_image_2_1.text_encoding import (
+    encode_prompt,
+    has_vision_tower,
+    sequence_length,
+    working_memory_bytes,
+)
 from invokeai.backend.qwen_image_2_1.vae import to_reference
 from invokeai.backend.stable_diffusion.diffusion.conditioning_data import (
     ConditioningFieldData,
@@ -69,22 +74,25 @@ class QwenImage21TextEncoderInvocation(BaseInvocation):
             raise ValueError(_NO_VISION_TOWER)
 
         context.util.signal_progress("Running Qwen3-VL text encoder")
-        with (
-            tokenizer_info as tokenizer,
-            processor_info.model_on_device() if processor_info is not None else nullcontext((None, None)) as (
-                _,
-                processor,
-            ),
-            text_encoder_info.model_on_device(working_mem_bytes=dequant_bytes) as (_, text_encoder),
-        ):
-            encoding = encode_prompt(
-                text_encoder,
-                tokenizer,
-                self.prompt,
-                get_effective_device(text_encoder),
-                processor=processor,
-                images=images,
-            )
+        with tokenizer_info as tokenizer:
+            # Reference images make the sequence long, and its attention grows with the square of it: room the
+            # model cache has to make, or the driver spills the encode to system memory and it crawls.
+            working_memory = dequant_bytes + working_memory_bytes(sequence_length(tokenizer, self.prompt, images))
+            with (
+                processor_info.model_on_device() if processor_info is not None else nullcontext((None, None)) as (
+                    _,
+                    processor,
+                ),
+                text_encoder_info.model_on_device(working_mem_bytes=working_memory) as (_, text_encoder),
+            ):
+                encoding = encode_prompt(
+                    text_encoder,
+                    tokenizer,
+                    self.prompt,
+                    get_effective_device(text_encoder),
+                    processor=processor,
+                    images=images,
+                )
 
         conditioning = QwenImage21ConditioningInfo(
             prompt_embeds=encoding.embeds.detach().cpu(),

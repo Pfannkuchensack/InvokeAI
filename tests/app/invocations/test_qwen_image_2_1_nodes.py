@@ -463,6 +463,64 @@ def test_the_processor_comes_from_the_qwen_image_2_1_pipeline_the_tokenizer_is_f
     assert (processor.key, processor.submodel_type) == ("qwen21", SubModelType.Processor)
 
 
+class _ReservationRecorded(Exception):
+    pass
+
+
+@pytest.mark.parametrize("num_references", [0, 4])
+def test_the_encoder_reserves_room_for_the_attention_its_references_need(num_references: int) -> None:
+    from invokeai.backend.qwen3_vl.qwen3_vl_assets import load_bundled_qwen3_vl_tokenizer
+
+    main = ModelIdentifierField(
+        key="qwen21", hash="h", name="Qwen-Image-2.1", base=BaseModelType.QwenImage21, type=ModelType.Main
+    )
+    tokenizer = main.model_copy(update={"submodel_type": SubModelType.Tokenizer})
+    encoder = main.model_copy(update={"submodel_type": SubModelType.TextEncoder})
+    reserved: list[int] = []
+
+    @contextmanager
+    def on_device(*, working_mem_bytes: int):
+        reserved.append(working_mem_bytes)
+        raise _ReservationRecorded
+        yield  # pragma: no cover
+
+    text_encoder = torch.nn.Module()
+    text_encoder.language_model = torch.nn.Linear(2, 2)
+    text_encoder.visual = torch.nn.Linear(2, 2)
+    infos = {
+        SubModelType.TextEncoder: SimpleNamespace(
+            model=text_encoder, compute_device=torch.device("cpu"), model_on_device=on_device
+        ),
+        SubModelType.Tokenizer: nullcontext(load_bundled_qwen3_vl_tokenizer()),
+        SubModelType.Processor: SimpleNamespace(model_on_device=lambda: nullcontext((None, None))),
+    }
+    node = QwenImage21TextEncoderInvocation.model_construct(
+        prompt="Combine the subjects of all reference images.",
+        qwen3_vl_encoder=Qwen3VLEncoderField(tokenizer=tokenizer, text_encoder=encoder, loras=[]),
+        reference_images=[ImageField(image_name=f"ref{i}.png") for i in range(num_references)],
+    )
+    context = SimpleNamespace(
+        images=SimpleNamespace(get_pil=lambda _name: Image.new("RGB", (1024, 1024))),
+        models=SimpleNamespace(
+            get_config=lambda _identifier: SimpleNamespace(
+                base=BaseModelType.QwenImage21, type=ModelType.Main, format=ModelFormat.Diffusers
+            ),
+            load=lambda identifier: infos[identifier.submodel_type],
+        ),
+        util=SimpleNamespace(signal_progress=lambda _message: None),
+    )
+
+    with pytest.raises(_ReservationRecorded):
+        node.invoke(context)
+
+    if num_references:
+        # Measured on an RTX 4090: four 1-megapixel references peak 5.44 GiB above the weights, and the allocator
+        # reserves about a fifth more. Less than that and the driver spills the encode to system memory.
+        assert reserved[0] >= 1.2 * 5.44 * 2**30
+    else:
+        assert reserved[0] < 2**28
+
+
 class _VAE:
     """Records what it encodes and answers with bf16 latents, as the real VAE runs in bf16."""
 

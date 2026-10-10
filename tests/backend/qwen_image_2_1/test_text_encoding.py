@@ -14,6 +14,7 @@ from invokeai.backend.qwen_image_2_1.text_encoding import (
     format_prompt,
     has_vision_tower,
     on_white,
+    sequence_length,
     system_prefix_length,
 )
 from tests.backend.model_manager.load.qwen3vl_gguf_fixture import tiny_qwen3vl_config
@@ -94,6 +95,13 @@ def test_each_reference_fills_one_run_of_slots_per_32px_block(text_encoder, toke
     # 64x96 is 3 rows of 2 blocks, 128x64 is 2 rows of 4, in the order given; the system turn is gone from both.
     assert grids == ((3, 2), (2, 4))
     assert _runs(image_slots) == [6, 8]
+
+
+def test_the_sequence_length_is_counted_before_encoding(text_encoder, tokenizer, processor) -> None:
+    # The working memory is reserved before the encoder runs, from this count; it has to be the length it reads.
+    references = [Image.new("RGB", (64, 96)), Image.new("RGB", (128, 64))]
+    embeds, _, _ = _encode(text_encoder, tokenizer, processor, references)
+    assert sequence_length(tokenizer, "swap them", references) == embeds.shape[1] + system_prefix_length(tokenizer)
 
 
 def test_the_vision_tower_reads_the_pixels(text_encoder, tokenizer, processor) -> None:
