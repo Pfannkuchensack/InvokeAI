@@ -2287,6 +2287,26 @@ export type paths = {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/gallery/items/location": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Gallery Item Location
+         * @description Returns exact item's position in an ordinary filtered gallery listing.
+         */
+        get: operations["get_gallery_item_location"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/gallery/item_names": {
         parameters: {
             query?: never;
@@ -16318,6 +16338,29 @@ export type components = {
          */
         GalleryItemKind: "image" | "video";
         /**
+         * GalleryItemLocation
+         * @description A gallery item's position in a filtered, ordered listing.
+         */
+        GalleryItemLocation: {
+            /** @description Whether the item is an image or video. */
+            kind: components["schemas"]["GalleryItemKind"];
+            /**
+             * Name
+             * @description The unique name of the image or video.
+             */
+            name: string;
+            /**
+             * Index
+             * @description The item's zero-based index in the listing.
+             */
+            index: number;
+            /**
+             * Total
+             * @description Number of items matching the listing filters.
+             */
+            total: number;
+        };
+        /**
          * GalleryItemNames
          * @description Ordered flat list of gallery item names plus counts for optimistic UI.
          *
@@ -22521,6 +22564,7 @@ export type components = {
          *         download_cache_dir: Path to the directory that contains dynamically downloaded models.
          *         legacy_conf_dir: Path to directory of legacy checkpoint config files.
          *         db_dir: Path to InvokeAI databases directory.
+         *         db_url: URL of a MySQL 8.4+ or MariaDB 10.11+ database to use instead of the SQLite database in `db_dir`, e.g. `mariadb+pymysql://invokeai:password@db.example/invokeai`. Needs the `mysql` extra. One InvokeAI process uses a database at a time. Read at startup only.
          *         db_synchronous: SQLite durability setting. `full`, the default and what InvokeAI has always used, flushes every commit to disk. `normal` acknowledges commits without waiting for that flush - measured at roughly 12x shorter commits on an SSD - and cannot corrupt the database under WAL, which is why it is refused, with a warning, when WAL is unavailable for the database file. What `normal` gives up is the most recent transactions on a power loss or OS crash: a just-written image record or queue status, not the image file itself.<br>Valid values: `full`, `normal`
          *         outputs_dir: Path to directory for outputs.
          *         image_subfolder_strategy: Strategy for organizing images into subfolders. 'flat' stores all images in a single folder. 'date' organizes by YYYY/MM/DD. 'type' organizes by image category. 'hash' uses first 2 characters of UUID for filesystem performance.<br>Valid values: `flat`, `date`, `type`, `hash`
@@ -22539,6 +22583,7 @@ export type components = {
          *         profiles_dir: Path to profiles output directory.
          *         max_cache_ram_gb: The maximum amount of CPU RAM to use for model caching in GB. If unset, the limit will be configured based on the available RAM. In most cases, it is recommended to leave this unset.
          *         max_cache_vram_gb: The amount of VRAM to use for model caching in GB. If unset, the limit will be configured based on the available VRAM and the device_working_mem_gb. In most cases, it is recommended to leave this unset.
+         *         reserve_vram_gb: The amount of VRAM (in GB) to subtract from the model cache's available memory budget. Defaults to 0.
          *         log_memory_usage: If True, a memory snapshot will be captured before and after every model cache operation, and the result will be logged (at debug level). There is a time cost to capturing the memory snapshots, so it is recommended to only enable this feature if you are actively inspecting the model cache's behaviour.
          *         model_cache_keep_alive_min: How long to keep models in cache after last use, in minutes. A value of 0 (the default) means models are kept in cache indefinitely. If no model generations occur within the timeout period, the model cache is cleared using the same logic as the 'Clear Model Cache' button.
          *         device_working_mem_gb: The amount of working memory to keep available on the compute device (in GB). Has no effect if running on CPU. If you are experiencing OOM errors, try increasing this value.
@@ -22554,6 +22599,7 @@ export type components = {
          *         pytorch_cuda_alloc_conf: Configure the Torch CUDA memory allocator. This will impact peak reserved VRAM usage and performance. Setting to "backend:cudaMallocAsync" works well on many systems. The optimal configuration is highly dependent on the system configuration (device type, VRAM, CUDA driver version, etc.), so must be tuned experimentally. Unset on a ROCm build of PyTorch on Windows, "expandable_segments:True" is used.
          *         device: Preferred execution device. `auto` will choose the device depending on the hardware platform and the installed torch capabilities.<br>Valid values: `auto`, `cpu`, `cuda`, `mps`, `xpu`, `cuda:N`, `xpu:N` (where N is a device number)
          *         precision: Floating point precision. `float16` will consume half the memory of `float32` but produce slightly lower-quality images. The `auto` setting will guess the proper precision based on your video card and operating system.<br>Valid values: `auto`, `float16`, `bfloat16`, `float32`
+         *         rocm_aotriton_experimental: Use AOTriton's fused (flash and memory-efficient) attention kernels on AMD GPUs that PyTorch marks experimental for them, such as the RX 7600/7700/7800 series, Ryzen AI 300/Max and the RX 9060 series, by setting TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL. Without them, attention on those GPUs runs on the slower math kernel, which also needs far more memory. `auto` turns them on only with a ROCm 10 build of PyTorch, and only when every GPU used for generation is one they were measured correct on (so far gfx1200, the RX 9060 series); `on` and `off` decide for any build and GPU. A TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL value already set in the environment takes precedence. Has no effect on other GPUs.<br>Valid values: `auto`, `on`, `off`
          *         sequential_guidance: Whether to calculate guidance in serial instead of in parallel, lowering memory requirements.
          *         noise_dtype: The dtype seeded noise is drawn in for SD1.5/SDXL, SD3, FLUX.1, FLUX.2, CogView4 and the Z-Image seed variance enhancer. `float32` draws the same noise on every platform. `float16` is the half-precision draw of earlier versions: on macOS it keeps the images your seeds gave before this update; on Windows and Linux both values give (nearly) the same images, and images made before the update cannot be reproduced there.<br>Valid values: `float32`, `float16`
          *         wan_memory_optimization: Enable experimental Wan memory optimizations at the cost of slower generation.
@@ -22731,6 +22777,11 @@ export type components = {
              */
             db_dir?: string;
             /**
+             * Db Url
+             * @description URL of a MySQL 8.4+ or MariaDB 10.11+ database to use instead of the SQLite database in `db_dir`, e.g. `mariadb+pymysql://invokeai:password@db.example/invokeai`. Needs the `mysql` extra. One InvokeAI process uses a database at a time. Read at startup only.
+             */
+            db_url?: string | null;
+            /**
              * Db Synchronous
              * @description SQLite durability setting. `full`, the default and what InvokeAI has always used, flushes every commit to disk. `normal` acknowledges commits without waiting for that flush - measured at roughly 12x shorter commits on an SSD - and cannot corrupt the database under WAL, which is why it is refused, with a warning, when WAL is unavailable for the database file. What `normal` gives up is the most recent transactions on a power loss or OS crash: a just-written image record or queue status, not the image file itself.
              * @default full
@@ -22874,6 +22925,12 @@ export type components = {
              */
             max_cache_vram_gb?: number | null;
             /**
+             * Reserve Vram Gb
+             * @description The amount of VRAM (in GB) to subtract from the model cache's available memory budget. Defaults to 0.
+             * @default 0
+             */
+            reserve_vram_gb?: number;
+            /**
              * Log Memory Usage
              * @description If True, a memory snapshot will be captured before and after every model cache operation, and the result will be logged (at debug level). There is a time cost to capturing the memory snapshots, so it is recommended to only enable this feature if you are actively inspecting the model cache's behaviour.
              * @default false
@@ -22956,7 +23013,7 @@ export type components = {
             device?: string;
             /**
              * Generation Devices
-             * @description Devices to use for parallel generation. `auto` (the default) uses every available GPU, running one generation session per GPU concurrently and distributing jobs fairly across users — unless the legacy `device` setting is pinned to a specific device, in which case `auto` uses only that device (preserving configs that pinned `device` before multi-GPU support existed). Provide an explicit list (e.g. `[cuda:0, cuda:1]`) to use specific devices regardless of `device`, or a single-device list (e.g. `[cuda:0]`) to run serially. On systems without a GPU, `auto` resolves to the single `cpu`/`mps` device.<br>Valid values: `auto`, or a list whose entries are each `cpu`, `cuda`, `mps`, `xpu`, `cuda:N`, or `xpu:N` (where N is a device number)
+             * @description Devices to use for parallel generation. `auto` (the default) uses every available GPU, except an integrated GPU next to a discrete one, running one generation session per GPU concurrently and distributing jobs fairly across users — unless the legacy `device` setting is pinned to a specific device, in which case `auto` uses only that device (preserving configs that pinned `device` before multi-GPU support existed). Provide an explicit list (e.g. `[cuda:0, cuda:1]`) to use specific devices regardless of `device`, or a single-device list (e.g. `[cuda:0]`) to run serially. On systems without a GPU, `auto` resolves to the single `cpu`/`mps` device.<br>Valid values: `auto`, or a list whose entries are each `cpu`, `cuda`, `mps`, `xpu`, `cuda:N`, or `xpu:N` (where N is a device number)
              * @default auto
              */
             generation_devices?: "auto" | string[];
@@ -22973,6 +23030,13 @@ export type components = {
              * @enum {string}
              */
             precision?: "auto" | "float16" | "bfloat16" | "float32";
+            /**
+             * Rocm Aotriton Experimental
+             * @description Use AOTriton's fused (flash and memory-efficient) attention kernels on AMD GPUs that PyTorch marks experimental for them, such as the RX 7600/7700/7800 series, Ryzen AI 300/Max and the RX 9060 series, by setting TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL. Without them, attention on those GPUs runs on the slower math kernel, which also needs far more memory. `auto` turns them on only with a ROCm 10 build of PyTorch, and only when every GPU used for generation is one they were measured correct on (so far gfx1200, the RX 9060 series); `on` and `off` decide for any build and GPU. A TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL value already set in the environment takes precedence. Has no effect on other GPUs.
+             * @default auto
+             * @enum {string}
+             */
+            rocm_aotriton_experimental?: "auto" | "on" | "off";
             /**
              * Sequential Guidance
              * @description Whether to calculate guidance in serial instead of in parallel, lowering memory requirements.
@@ -25122,10 +25186,14 @@ export type components = {
          *     The duration head reads the same connector outputs the transformer's prompt cross-attention
          *     consumes, so it judges the prompt the model will actually see rather than its raw text. The
          *     prediction is clamped to `min_seconds`/`max_seconds` and then snapped down onto the VAE's
-         *     causal temporal grid (`8k + 1`), which is the only frame count a generation can run at.
+         *     causal temporal grid (`8k + 1`), which is the only frame count a generation can run at. The
+         *     total is then capped at `max_num_frames` (by default LTX-2's longest clip), which can be
+         *     shorter than `max_seconds` at a high frame rate.
          *
-         *     Conditioning clips and video extension fix the frame count by construction -- the source
-         *     footage decides it -- so this node has nothing to say about those graphs.
+         *     For an extension, the prompt describes the continuation rather than the frames it opens with,
+         *     so the prediction sizes the new material and `context_frames` is added in front of it.
+         *     Conditioning clips fix the frame count by construction -- the clip decides it -- so this node
+         *     has nothing to say about those graphs.
          */
         LTX2DurationInvocation: {
             /**
@@ -25176,6 +25244,18 @@ export type components = {
              */
             max_seconds?: number;
             /**
+             * Context Frames
+             * @description Source frames the run opens with, as an extension's `context_frames`. The prediction covers what follows them, so they are added to it. 0 when nothing is held.
+             * @default 0
+             */
+            context_frames?: number;
+            /**
+             * Max Num Frames
+             * @description Longest total frame count, context included, the run was sized for. The result is capped at it, so it holds at whatever `fps` the run turns out to have.
+             * @default 481
+             */
+            max_num_frames?: number;
+            /**
              * type
              * @default ltx2_duration
              * @constant
@@ -25189,7 +25269,7 @@ export type components = {
         LTX2DurationOutput: {
             /**
              * Num Frames
-             * @description Frame count on LTX-2's 8k+1 grid. Wire into the denoise node's `num_frames`.
+             * @description Frame count on LTX-2's 8k+1 grid, including any context frames. Wire into the denoise node's `num_frames`.
              */
             num_frames: number;
             /**
@@ -56366,6 +56446,58 @@ export interface operations {
             };
         };
     };
+    get_gallery_item_location: {
+        parameters: {
+            query: {
+                /** @description Whether the target is an image or video. */
+                kind: components["schemas"]["GalleryItemKind"];
+                /** @description The target image or video name. */
+                name: string;
+                /** @description The origin of items to list. */
+                origin?: components["schemas"]["ResourceOrigin"] | null;
+                /** @description The categories to include. Shared between images and videos. */
+                categories?: components["schemas"]["ImageCategory"][] | null;
+                /** @description Whether to list intermediate items. */
+                is_intermediate?: boolean | null;
+                /** @description The board id to filter by. Use 'none' to find items without a board. */
+                board_id?: string | null;
+                /** @description The order of sort */
+                order_dir?: components["schemas"]["SQLiteDirection"];
+                /** @description Filter by starred state: true for starred items only, false for unstarred only. Omit to include both. */
+                starred?: boolean | null;
+                /** @description The term to search for */
+                search_term?: string | null;
+                /** @description Inclusive start date (YYYY-MM-DD) to filter by created_at. */
+                created_from?: string | null;
+                /** @description Inclusive end date (YYYY-MM-DD) to filter by created_at. */
+                created_to?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GalleryItemLocation"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_gallery_item_names: {
         parameters: {
             query?: {
@@ -58890,7 +59022,7 @@ export interface operations {
             query?: {
                 /** @description The page to get */
                 page?: number;
-                /** @description The number of workflows per page */
+                /** @description The number of workflows per page; all of them when omitted */
                 per_page?: number | null;
                 /** @description The attribute to order by */
                 order_by?: components["schemas"]["WorkflowRecordOrderBy"];
