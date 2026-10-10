@@ -59,6 +59,9 @@ from invokeai.backend.patches.lora_conversions.minimax_h3_lora_constants import 
     has_non_minimax_h3_architecture_keys,
     has_unsupported_minimax_h3_lora_variant_keys,
 )
+from invokeai.backend.patches.lora_conversions.qwen_image_2_1_lora_constants import (
+    unsupported_keys as qwen_image_21_unsupported_lora_keys,
+)
 from invokeai.backend.patches.lora_conversions.wan_lora_constants import (
     detect_wan_lora_variant,
     has_non_wan_architecture_keys,
@@ -911,7 +914,9 @@ class LoRA_LyCORIS_QwenImage_Config(LoRA_LyCORIS_Config_Base, Config_Base):
 
 _QWEN_IMAGE21_HIDDEN_SIZE = 4096
 _QWEN_IMAGE21_MLP_MARKERS = ("img_mlp.gate_up.", "img_mlp.gate_layer.", "img_mlp_gate_up", "img_mlp_gate_layer")
-_ATTENTION_PROJECTIONS = ("attn.to_q.", "attn.to_k.", "attn.to_v.", "attn_to_q.", "attn_to_k.", "attn_to_v.")
+# A block's own attention, dotted or Kohya-flattened. Anchored to the block: LTX-2's `audio_to_video_attn.to_q`
+# is as wide and would match the bare `attn.to_q`.
+_BLOCK_ATTENTION_PROJECTION = re.compile(r"transformer_blocks[._]\d+[._]attn[._]to_[qkv][._]")
 
 
 def _has_qwen_image21_lora_keys(state_dict: dict[str | int, Any]) -> bool:
@@ -928,7 +933,7 @@ def _has_qwen_image21_lora_keys(state_dict: dict[str | int, Any]) -> bool:
             return True
         if (
             key.endswith((".lora_A.weight", ".lora_down.weight"))
-            and any(projection in key for projection in _ATTENTION_PROJECTIONS)
+            and _BLOCK_ATTENTION_PROJECTION.search(key) is not None
             and len(getattr(value, "shape", ())) == 2
             and value.shape[1] == _QWEN_IMAGE21_HIDDEN_SIZE
         ):
@@ -1075,6 +1080,43 @@ class LoRA_LyCORIS_Krea2_Config(LoRA_LyCORIS_Config_Base, Config_Base):
         if _has_krea2_lora_keys(mod.load_state_dict()):
             return BaseModelType.Krea2
         raise NotAMatchError("model does not look like a Krea-2 LoRA")
+
+
+def _is_qwen_image21_lora(state_dict: dict[str | int, Any]) -> bool:
+    """A Qwen-Image-2.1 LoRA that applies in full, and not one for a family whose module names it shares.
+
+    FLUX.2 Klein 9B is as wide (4096) and names its double blocks' attention the same. Its fingerprints (text
+    embedder widths, fused single-block projections) rule most of its LoRAs out, and every key having to name a
+    Qwen-Image-2.1 module rules out the rest that touch a module only a dual-stream model has (`add_q_proj`, `ff`).
+    A LoRA on nothing but the image attention of Klein's first eight blocks reads the same as a Qwen-Image-2.1 one.
+    """
+    return (
+        _has_qwen_image21_lora_keys(state_dict)
+        and not _is_flux2_lora_state_dict(state_dict)
+        and not qwen_image_21_unsupported_lora_keys(state_dict)
+    )
+
+
+class LoRA_LyCORIS_QwenImage21_Config(LoRA_LyCORIS_Config_Base, Config_Base):
+    """Model config for Qwen-Image-2.1 LoRAs: ComfyUI (`diffusion_model.`, fused `gate_up`), diffusers/PEFT and
+    Kohya layouts, as plain low-rank layers."""
+
+    base: Literal[BaseModelType.QwenImage21] = Field(default=BaseModelType.QwenImage21)
+
+    @classmethod
+    def _validate_looks_like_lora(cls, mod: ModelOnDisk) -> None:
+        state_dict = mod.load_state_dict()
+        if not (_is_qwen_image21_lora(state_dict) and _has_complete_lora_pair(state_dict)):
+            raise NotAMatchError("model does not match Qwen-Image-2.1 LoRA heuristics")
+        # An orphaned half would install here and fail in conversion at generation time.
+        if not _lora_weight_keys_are_all_paired(state_dict):
+            raise NotAMatchError("Qwen-Image-2.1 LoRA has an incomplete lora_A/B (or lora_down/up) weight pair")
+
+    @classmethod
+    def _get_base_or_raise(cls, mod: ModelOnDisk) -> BaseModelType:
+        if _is_qwen_image21_lora(mod.load_state_dict()):
+            return BaseModelType.QwenImage21
+        raise NotAMatchError("model does not look like a Qwen-Image-2.1 LoRA")
 
 
 class LoRA_LyCORIS_Anima_Config(LoRA_LyCORIS_Config_Base, Config_Base):
