@@ -16,9 +16,12 @@ speeds are on each family's own page.
 - ✓ loads
 - **L** installs, but loading it for generation fails with a message naming the reason
 - **R** the install fails with a message naming the reason
-- ✗ not supported: InvokeAI does not recognize the file, so it installs as an unknown model (the reason, if any, is
-  only in the server log)
+- ✗ not supported
 - – no such build exists
+
+How an unsupported file fails depends on the file. Some are not recognized at all and install as an unknown model,
+with the reason only in the server log: the Diffusers layout of LTX-2 and the GGUF builds of LTX-2, MiniMax H3 and the
+Ministral 3B encoder. Others are recognized by their layer names and fail, or misbehave, only when they load.
 
 ## Main models
 
@@ -43,8 +46,9 @@ speeds are on each family's own page.
   checkpoint layouts; other exports of the same schemes (AWQ, ModelOpt) fail when the model loads.
 - **GGUF** covers the llama.cpp types (Q4_0 through Q8_0, the K-quants, BF16). ComfyUI-GGUF's `Q8_CR` files load
   for Krea-2 only; for every other model with GGUF support the install fails.
-- LTX-2.0/2.3 files fail to install with a message. Wan 2.1, Wan Animate, S2V, Fun-Control and VACE files are not
-  recognized as Wan 2.2 and install as unknown models.
+- LTX-2.0/2.3 files fail to install with a message. Wan 2.1, Wan Animate, S2V, Fun-Control and VACE single files and
+  GGUFs are not recognized as Wan 2.2 and install as unknown models; a Wan 2.1 Diffusers folder is not detected and
+  is not supported either.
 
 ## Text encoders
 
