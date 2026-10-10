@@ -55,7 +55,7 @@ Ministral 3B encoder. Others are recognized by their layer names and fail, or mi
 | Encoder | Used by | Folder | Single file (bf16) | fp8 scaled | int8 | nvfp4 | GGUF | SDNQ |
 |---|---|---|---|---|---|---|---|---|
 | T5-XXL | FLUX.1, SD 3 | ✓ | ✗ | ✗ | ✗ | ✗ | ✓ | ✓ (and bitsandbytes int8) |
-| CLIP-L / CLIP-G | SD, SDXL, FLUX.1, SD 3 | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |
+| CLIP-L / CLIP-G | SD, SDXL, FLUX.1, SD 3 | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | CLIP-L inside a FLUX.1 SDNQ pipeline |
 | Qwen3 0.6B / 4B / 8B | Z-Image, FLUX.2 Klein, Anima | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
 | Qwen3-VL 4B / 8B | Krea-2, Ideogram 4 | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✗ |
 | Qwen3-VL 32B (truncated) | MiniMax H3 | in the Diffusers folder | ✓ | L | ✓ | L | ✗ | ✗ |
