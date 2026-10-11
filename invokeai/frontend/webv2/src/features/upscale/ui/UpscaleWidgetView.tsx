@@ -43,6 +43,7 @@ import {
   createDefaultUpscaleWidgetValues,
   needsExplicitComponents,
   getUpscaleOutputDimensions,
+  isFluxClipEmbedModel,
   isSpandrelModelConfig,
   isSupportedUpscaleMainModel,
   isTileControlNetCandidate,
@@ -697,6 +698,7 @@ export const UpscaleWidgetView = () => {
                 label={t('widgets.upscale.clipEmbed')}
               >
                 <ModelSelect
+                  filter={isFluxClipEmbedModel}
                   invalid={!values.clipEmbedModel}
                   modelTypes={CLIP_EMBED_MODEL_TYPES}
                   placeholder={t('widgets.upscale.selectClipEmbed')}

@@ -155,21 +155,25 @@ export const isSupportedUpscaleMainModel = (value: unknown): value is MainModelC
 const isComponentModelOfType = (value: unknown, type: string): value is ComponentModelConfig =>
   isRecord(value) && value.type === type && isModelIdentifierConfig(value);
 
+const isT5EncoderModel = (value: unknown): value is ComponentModelConfig => isComponentModelOfType(value, 't5_encoder');
+
+/** FLUX.1 encodes with CLIP-L; a CLIP-G fails its text encoder. */
+export const isFluxClipEmbedModel = (value: unknown): value is ComponentModelConfig =>
+  isComponentModelOfType(value, 'clip_embed') && value.variant === 'large';
+
 const pickComponent = (
   stored: unknown,
   models: readonly ModelConfig[],
-  type: string,
+  isCandidate: (value: unknown) => value is ComponentModelConfig,
   required: boolean
 ): ComponentModelConfig | null => {
-  if (isComponentModelOfType(stored, type)) {
+  if (isCandidate(stored)) {
     return stored;
   }
 
   // Only auto-pick where the architecture cannot run without one; elsewhere a stale selection is
   // simply dropped rather than replaced with an arbitrary encoder.
-  return required
-    ? ((models.find((model) => isComponentModelOfType(model, type)) as ComponentModelConfig) ?? null)
-    : null;
+  return required ? ((models.find(isCandidate) as ComponentModelConfig | undefined) ?? null) : null;
 };
 
 const pickCompatibleVae = (
@@ -236,7 +240,7 @@ export const createDefaultUpscaleWidgetValues = (models: readonly ModelConfig[] 
   return {
     batchCount: 1,
     cfgScale: 2,
-    clipEmbedModel: pickComponent(null, models, 'clip_embed', needsComponents),
+    clipEmbedModel: pickComponent(null, models, isFluxClipEmbedModel, needsComponents),
     clipSkip: 0,
     creativity: 0,
     inputImage: null,
@@ -253,7 +257,7 @@ export const createDefaultUpscaleWidgetValues = (models: readonly ModelConfig[] 
     seedMode: 'random',
     steps: 30,
     structure: 0,
-    t5EncoderModel: pickComponent(null, models, 't5_encoder', needsComponents),
+    t5EncoderModel: pickComponent(null, models, isT5EncoderModel, needsComponents),
     tileControlnetModel: models.find((candidate) => isTileControlNetCandidate(candidate, model)) ?? null,
     tileOverlap: 128,
     tileSize: 1024,
@@ -277,7 +281,7 @@ export const normalizeUpscaleWidgetValues = (value: unknown): UpscaleWidgetValue
   return {
     batchCount: sanitizeBatchCount(value.batchCount),
     cfgScale: isFiniteNumber(value.cfgScale) ? value.cfgScale : defaults.cfgScale,
-    clipEmbedModel: isComponentModelOfType(value.clipEmbedModel, 'clip_embed') ? value.clipEmbedModel : null,
+    clipEmbedModel: isFluxClipEmbedModel(value.clipEmbedModel) ? value.clipEmbedModel : null,
     clipSkip: isFiniteNumber(value.clipSkip) ? value.clipSkip : defaults.clipSkip,
     creativity: isFiniteNumber(value.creativity) ? value.creativity : defaults.creativity,
     inputImage:
@@ -348,13 +352,13 @@ export const syncUpscaleWidgetValuesWithModels = (
   const t5EncoderModel = pickComponent(
     values.t5EncoderModel ? modelsByKey.get(values.t5EncoderModel.key) : undefined,
     models,
-    't5_encoder',
+    isT5EncoderModel,
     needsComponents
   );
   const clipEmbedModel = pickComponent(
     values.clipEmbedModel ? modelsByKey.get(values.clipEmbedModel.key) : undefined,
     models,
-    'clip_embed',
+    isFluxClipEmbedModel,
     needsComponents
   );
   const storedVae = values.vae ? modelsByKey.get(values.vae.key) : undefined;
