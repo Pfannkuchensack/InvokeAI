@@ -43,3 +43,4 @@ export {
 } from './data/queryCache';
 export type { GalleryItemCachePatch } from './data/queryCache';
 export { createGalleryRealtimeRuntime } from './data/realtimeRuntime';
+export { galleryBoardExists } from './data/backend';

@@ -220,7 +220,9 @@ export const duplicateProjectRecord = async (
       },
     };
   } catch (error) {
-    const rollback = () => rollbackRestoredMedia(ledger, { signal: owner.signal });
+    // The staging boards it deletes may already be listed: uploads to them announce themselves.
+    const rollback = () =>
+      rollbackRestoredMedia(ledger, { signal: owner.signal }).finally(() => invalidateBoardLists(owner));
 
     // Before the create was even attempted nothing is ambiguous: whatever was staged or copied is ours to drop.
     if (!didAttemptProjectCreate && isAccountScopeCurrent(owner)) {
