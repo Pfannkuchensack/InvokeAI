@@ -58,8 +58,7 @@ from invokeai.backend.quantization.fp8_scaled import (
     split_fp8_scaled_layers,
     warn_on_unattached_scales,
 )
-from invokeai.backend.quantization.gguf.loaders import gguf_sd_loader
-from invokeai.backend.quantization.gguf.materialize import dequantize_ggml_at_load
+from invokeai.backend.quantization.gguf.loaders import gguf_sd_loader, unpack_ggml_at_load
 from invokeai.backend.quantization.int8_convrot import (
     drop_unconsumed_quantization_sidecars,
     extract_int8_convrot_markers,
@@ -525,7 +524,7 @@ class Ideogram4GGUFModel(ModelLoader):
     repository's ``Ideogram4Transformer``, one branch per file, paired at the loader node exactly
     like the safetensors builds. The Linear weights stay packed as ``GGMLTensor`` and dequantize per
     forward through the model cache's autocast layers; what the model reads outside a matmul, and
-    what is not actually quantized, is dequantized here (see `dequantize_ggml_at_load`).
+    what is not actually quantized, is dequantized here (see `unpack_ggml_at_load`).
 
     No `fp8_storage` declaration: FP8 Storage is refused for every quantized format by rule, and a
     packed weight cannot be re-encoded anyway.
@@ -556,9 +555,7 @@ class Ideogram4GGUFModel(ModelLoader):
         with accelerate.init_empty_weights():
             model: torch.nn.Module = Ideogram4Transformer(Ideogram4Config())
 
-        dequantized = dequantize_ggml_at_load(
-            sd, model, _model_declared_skip_patterns(model), self._ram_cache.make_room
-        )
+        dequantized = unpack_ggml_at_load(sd, model, _model_declared_skip_patterns(model), self._ram_cache.make_room)
 
         # Strict, as for the safetensors files: every published GGUF is key-for-key this model.
         model.load_state_dict(sd, strict=True, assign=True)

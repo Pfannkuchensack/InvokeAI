@@ -31,8 +31,7 @@ from invokeai.backend.quantization.fp8_scaled import (
     strip_layer_path_prefix,
     warn_on_unattached_scales,
 )
-from invokeai.backend.quantization.gguf.loaders import gguf_sd_loader
-from invokeai.backend.quantization.gguf.materialize import dequantize_ggml_at_load
+from invokeai.backend.quantization.gguf.loaders import gguf_sd_loader, unpack_ggml_at_load
 from invokeai.backend.quantization.int8_convrot import (
     drop_unconsumed_quantization_sidecars,
     extract_int8_convrot_markers,
@@ -240,7 +239,7 @@ class QwenImage21GGUFCheckpointModel(ModelLoader):
         model = _build_transformer(sd)
         # What the model reads outside a matmul (the norms, `txt_in.text_norm` among them) and what the GGUF stores
         # unquantized cannot, or need not, stay packed.
-        dequantize_ggml_at_load(sd, model, _model_declared_skip_patterns(model), self._ram_cache.make_room)
+        unpack_ggml_at_load(sd, model, _model_declared_skip_patterns(model), self._ram_cache.make_room)
 
         load_state_dict_ignoring_extras(
             model, sd, source="Qwen-Image-2.1 GGUF checkpoint", assign=True, allow_missing=True
