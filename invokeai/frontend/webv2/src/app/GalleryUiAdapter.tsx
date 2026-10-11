@@ -4,6 +4,7 @@ import type { ProjectLibrarySnapshot } from '@workbench/projects/library';
 import type { ReactNode } from 'react';
 
 import { GalleryUiProvider } from '@features/gallery/react';
+import { useAuthSession } from '@features/identity';
 import { useMountEffect } from '@platform/react/useMountEffect';
 import { captureAccountScope, isAccountScopeCurrent } from '@platform/state/accountLifecycle';
 import { useProjectLibrarySelector } from '@workbench/projects/library';
@@ -60,6 +61,8 @@ export const GalleryUiAdapterProvider = ({ children }: { children: ReactNode }) 
   const accountScope = captureAccountScope();
   const exportProject = useExportLibraryProject();
   const openWorkbenchWidget = useOpenWorkbenchWidget();
+  const session = useAuthSession();
+  const currentUserId = session.multiuserEnabled ? (session.user?.user_id ?? null) : null;
   // Only what the gallery needs to label other projects' boards, compared structurally: every autosave ack and
   // library refresh rebuilds the summaries, and the gallery must not re-render for cover or timestamp churn.
   const projects = useProjectLibrarySelector(selectGalleryProjects, areGalleryProjectsEqual);
@@ -72,6 +75,7 @@ export const GalleryUiAdapterProvider = ({ children }: { children: ReactNode }) 
   const adapter = useMemo<GalleryUiAdapter>(
     () => ({
       antialiasProgressImages,
+      currentUserId,
       exportProject,
       gallery: {
         ...gallery,
@@ -130,6 +134,7 @@ export const GalleryUiAdapterProvider = ({ children }: { children: ReactNode }) 
     [
       accountScope,
       antialiasProgressImages,
+      currentUserId,
       exportProject,
       gallery,
       galleryValues,

@@ -122,10 +122,14 @@ const WorkbenchDrag = ({ children }: { children: ReactNode }) => {
   );
 };
 
-const renderPanel = async (gallery: GalleryStateView = createGallery(), { withDrag = false } = {}) => {
+const renderPanel = async (
+  gallery: GalleryStateView = createGallery(),
+  { currentUserId = null, withDrag = false }: { currentUserId?: string | null; withDrag?: boolean } = {}
+) => {
   const contextValue = {
     actions,
     boardsState: { error: null, isRetrying: false, retry: () => Promise.resolve(), status: 'ready' },
+    currentUserId,
     gallery,
     itemActions,
     projectId: 'p1',
@@ -440,6 +444,31 @@ describe('GalleryBoardsPanel', () => {
       await drag(row('Façades').querySelector<HTMLElement>('.board-row-actions')!, heading('Library'));
 
       expect(actions.moveBoard).not.toHaveBeenCalled();
+    });
+
+    it('drags only boards the server would move, and only onto the caller’s own projects', async () => {
+      // An admin sees other people's boards and projects; a shared board of their own stays in the Library.
+      await renderPanel(
+        {
+          ...createGallery({ showOtherProjectBoards: true }),
+          boards: boards.map((board) =>
+            board.projectId === 'p2' || board.id === 'cats'
+              ? { ...board, ownerId: 'them' }
+              : board.id === 'dogs'
+                ? { ...board, ownerId: 'me', visibility: 'shared' as const }
+                : { ...board, ownerId: 'me' }
+          ),
+        } as GalleryStateView,
+        { currentUserId: 'me', withDrag: true }
+      );
+
+      await drag(row('Cats'), heading('Mahogany House'));
+      await drag(row('dogs'), heading('Mahogany House'));
+      await drag(row('Façades'), heading('Harbor Tower'));
+      expect(actions.moveBoard).not.toHaveBeenCalled();
+
+      await drag(row('Façades'), heading('Library'));
+      expect(actions.moveBoard).toHaveBeenCalledExactlyOnceWith('mine-member', null, 'Library');
     });
 
     it('takes a drop on a collapsed tier, by its heading', async () => {

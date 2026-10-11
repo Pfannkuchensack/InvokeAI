@@ -38,6 +38,24 @@ export interface GalleryBoardGroups {
 export const isManagedGalleryBoard = (board: GalleryBoard, projectBoardId: string | null): boolean =>
   board.kind === 'board' && !board.isInbox && board.id !== projectBoardId;
 
+/** Whether the board is the signed-in user's; on a single-user install (`currentUserId` null), every board is. */
+export const isOwnGalleryBoard = (board: GalleryBoard, currentUserId: string | null): boolean =>
+  currentUserId === null || board.ownerId === undefined || board.ownerId === currentUserId;
+
+/**
+ * Whether the board can move between the Library and projects, by menu or by dragging. Only into its owner's own
+ * projects, which are the only ones the caller can name, and only while it is private: a shared or public board stays
+ * in the Library. An admin may manage someone else's board, but not move it into a project of theirs.
+ */
+export const canMoveGalleryBoard = (
+  board: GalleryBoard,
+  projectBoardId: string | null,
+  currentUserId: string | null
+): boolean =>
+  isManagedGalleryBoard(board, projectBoardId) &&
+  isOwnGalleryBoard(board, currentUserId) &&
+  (board.visibility ?? 'private') === 'private';
+
 /**
  * Apply visibility filters while grouping; GET /boards/ cannot filter by project and returns the complete list.
  * Membership is the board's own `projectId`; `projectBoardId` also claims the open project's inbox, which a draft

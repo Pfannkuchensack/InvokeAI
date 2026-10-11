@@ -90,6 +90,8 @@ export interface GalleryWidgetContextValue {
   /** See `GalleryData.pinRevealIndex`; offered for sparse infinite listings only. */
   pinRevealIndex?: (absoluteIndex: number) => void;
   starredStrip: GalleryStarredStrip;
+  /** See `GalleryUiAdapter.currentUserId`. */
+  currentUserId: string | null;
   projectId: string;
   projectName: string;
   /** Names for the projects other boards belong to, keyed by project id. */

@@ -113,6 +113,8 @@ export interface GalleryUiAdapter {
   /** Resolves an item's best image-map vocabulary label, or null when it has none. */
   getItemLabel(item: GalleryItemRef): Promise<string | null>;
   notifications: GalleryNotificationsPort;
+  /** The signed-in user, whose boards alone can move into or between their projects; null on a single-user install. */
+  currentUserId?: string | null;
   projectId: string;
   projectName: string;
   /** The account's projects, for naming the boards that belong to each; the open project need not be among them. */

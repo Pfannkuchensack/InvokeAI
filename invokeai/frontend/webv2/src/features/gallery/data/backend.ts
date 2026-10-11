@@ -56,6 +56,8 @@ interface BackendBoardDTO {
   created_at?: string | null;
   /** Board owner's display name; populated only for admins on multi-user backends. */
   owner_username?: string | null;
+  user_id?: string;
+  board_visibility?: 'private' | 'shared' | 'public';
   /** The project this board belongs to; absent or null for a Library board. */
   project_id?: string | null;
   /** Its project's inbox, which only the project routes may rename, archive, move or delete. */
@@ -183,8 +185,10 @@ const mapBoard = (board: BackendBoardDTO): GalleryBoard => ({
   isInbox: board.is_inbox ?? false,
   kind: 'board',
   name: board.board_name,
+  ownerId: board.user_id,
   ownerName: board.owner_username ?? null,
   projectId: board.project_id ?? null,
+  visibility: board.board_visibility,
   videoCount: board.video_count ?? 0,
 });
 

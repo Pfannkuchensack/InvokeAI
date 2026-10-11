@@ -64,6 +64,8 @@ export interface GalleryBoard {
   coverThumbnailUrl?: string;
   /** ISO creation timestamp; absent for uncategorized and date virtual boards. */
   createdAt?: string | null;
+  /** The owner's user id; a project only ever holds its owner's boards. */
+  ownerId?: string;
   ownerName?: string | null;
   /**
    * The project this board belongs to; null is the Library. Members are ordinary boards; only the inbox is
@@ -72,6 +74,8 @@ export interface GalleryBoard {
   projectId: string | null;
   /** Its project's inbox: named after the project and only renamed, archived, moved or deleted through it. */
   isInbox: boolean;
+  /** Who besides its owner can see it; only a private board can join a project. Absent reads as private. */
+  visibility?: 'private' | 'shared' | 'public';
 }
 
 export interface GalleryImage extends GeneratedImageContract {

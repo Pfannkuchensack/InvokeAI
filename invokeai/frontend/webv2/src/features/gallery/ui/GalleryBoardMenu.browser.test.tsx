@@ -66,6 +66,8 @@ const context = {
     projectBoardId: null,
     settings: { autoAddBoardId: 'follow' },
   },
+  // Signed in, as an admin can be, alongside boards that are not theirs.
+  currentUserId: 'me',
   projectId: 'p1',
   projectName: 'Mahogany House',
   projectNames: new Map([
@@ -153,11 +155,11 @@ it('hands results back to the selected board from the auto-add board itself', as
   expect(context.actions.updateSettings).toHaveBeenLastCalledWith({ autoAddBoardId: 'follow' });
 });
 
-const renderMenuFor = async (menuBoard: GalleryBoard) => {
+const renderMenuFor = async (menuBoard: GalleryBoard, overrides: Partial<GalleryWidgetContextValue> = {}) => {
   await act(async () => {
     root?.render(
       <ChakraProvider value={system}>
-        <GalleryWidgetContext value={context}>
+        <GalleryWidgetContext value={{ ...context, ...overrides }}>
           <GalleryBoardMenu target={{ board: menuBoard, x: 20, y: 20 }} onClose={noop} />
         </GalleryWidgetContext>
       </ChakraProvider>
@@ -207,6 +209,24 @@ it('offers a Library board the open project first', async () => {
   expect(
     menuItemLabels().filter((label) => label === 'Library' || label === 'Harbor Tower' || label === 'Mahogany House')
   ).toEqual(['Mahogany House', 'Harbor Tower']);
+});
+
+it.each([
+  ['someone else’s board, which only its owner can move into their projects', { ownerId: 'them' }],
+  ['a shared or public board, which stays in the Library', { ownerId: 'me', visibility: 'shared' as const }],
+])('offers no move for %s, while keeping the rest of its menu', async (_label, overrides) => {
+  await renderMenuFor({ ...board, ...overrides } as GalleryBoard);
+
+  const labels = menuItemLabels();
+
+  expect(labels).not.toContain('Move to…');
+  expect(labels).toContain('widgets.gallery.renameBoard');
+});
+
+it('offers the move on a single-user install, where every board is the one user’s whatever owner it records', async () => {
+  await renderMenuFor({ ...board, ownerId: 'system' } as GalleryBoard, { currentUserId: null });
+
+  expect(menuItemLabels()).toContain('Move to…');
 });
 
 it('leaves an inbox with only the actions its project does not own', async () => {

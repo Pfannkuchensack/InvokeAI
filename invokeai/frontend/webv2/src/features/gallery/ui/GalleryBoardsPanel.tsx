@@ -15,7 +15,7 @@ import { useTranslation } from 'react-i18next';
 
 import { BoardCoverIcon } from './GalleryBoardCover';
 import { GalleryBoardFilters } from './GalleryBoardFilters';
-import { getGalleryBoardGroups, isManagedGalleryBoard } from './galleryBoardGroups';
+import { canMoveGalleryBoard, getGalleryBoardGroups, isOwnGalleryBoard } from './galleryBoardGroups';
 import { GalleryBoardMenu, type GalleryBoardMenuTarget } from './GalleryBoardMenu';
 import { GalleryBoardRow } from './GalleryBoardRow';
 import { GalleryBoardRowShell } from './GalleryBoardRowShell';
@@ -37,7 +37,8 @@ type CreateTier = 'library' | 'project';
 
 export const GalleryBoardsPanel = () => {
   const { t } = useTranslation();
-  const { actions, boardsState, gallery, projectId, projectName, projectNames, region } = useGalleryWidget();
+  const { actions, boardsState, currentUserId, gallery, projectId, projectName, projectNames, region } =
+    useGalleryWidget();
   // Boards move between tiers by dragging only inside the workbench's drag context; elsewhere, by their menu.
   const canDragBoards = use(GalleryDragScope);
   const [searchTerm, setSearchTerm] = useState('');
@@ -204,7 +205,9 @@ export const GalleryBoardsPanel = () => {
       key={board.id}
       accessibleName={accessibleName}
       board={board}
-      dragScope={canDragBoards && isManagedGalleryBoard(board, gallery.projectBoardId) ? region : undefined}
+      dragScope={
+        canDragBoards && canMoveGalleryBoard(board, gallery.projectBoardId, currentUserId) ? region : undefined
+      }
       isAutoAddTarget={board.id === gallery.settings.autoAddBoardId}
       isMenuOpen={boardMenuTarget?.board.id === board.id}
       isSelected={board.id === gallery.selectedBoardId}
@@ -224,9 +227,10 @@ export const GalleryBoardsPanel = () => {
         onSelect={tier === 'project' ? createProjectBoardFromSearch : createLibraryBoardFromSearch}
       />
     ) : null;
-  // A dragged board moves to whichever tier it is dropped on.
-  const renderDropTier = (tierProjectId: string | null, label: string, content: ReactNode) =>
-    canDragBoards ? (
+  // A dragged board moves to whichever tier it is dropped on, so long as the tier is the caller's: an admin also sees
+  // other people's projects, which only their owners' boards can join.
+  const renderDropTier = (tierProjectId: string | null, label: string, content: ReactNode, isOwnTier = true) =>
+    canDragBoards && isOwnTier ? (
       <GalleryBoardTierDropZone dropScope={region} label={label} projectId={tierProjectId}>
         {content}
       </GalleryBoardTierDropZone>
@@ -338,7 +342,8 @@ export const GalleryBoardsPanel = () => {
                             board.isInbox ? t('widgets.gallery.inboxOf', { project: group.label }) : undefined
                           )
                         )}
-                      </Stack>
+                      </Stack>,
+                      group.boards.every((board) => isOwnGalleryBoard(board, currentUserId))
                     )}
                   </Fragment>
                 ))}

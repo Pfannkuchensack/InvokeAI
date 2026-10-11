@@ -20,7 +20,7 @@ import {
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-import { isManagedGalleryBoard } from './galleryBoardGroups';
+import { canMoveGalleryBoard, isManagedGalleryBoard } from './galleryBoardGroups';
 import { useGalleryWidget } from './GalleryWidgetContext';
 
 export interface GalleryBoardMenuTarget {
@@ -41,7 +41,7 @@ export const GalleryBoardMenu = ({
   onClose: () => void;
 }) => {
   const { t } = useTranslation();
-  const { actions, gallery } = useGalleryWidget();
+  const { actions, currentUserId, gallery } = useGalleryWidget();
   const [renameTarget, setRenameTarget] = useState<GalleryBoard | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<GalleryBoard | null>(null);
   const [renameValue, setRenameValue] = useState('');
@@ -157,7 +157,9 @@ export const GalleryBoardMenu = ({
                 {isManagedBoard && (
                   <>
                     <BoardRenameMenuItem board={board} onRename={setRenameTarget} onRenameValue={setRenameValue} />
-                    <BoardMoveSubMenu board={board} onBoardMoved={onBoardRelocated} />
+                    {canMoveGalleryBoard(board, gallery.projectBoardId, currentUserId) && (
+                      <BoardMoveSubMenu board={board} onBoardMoved={onBoardRelocated} />
+                    )}
                     <BoardArchiveMenuItem archived={board.archived} boardId={board.id} onArchive={onBoardRelocated} />
                     <Menu.Separator />
                     <BoardDeleteMenuItem board={board} onDelete={setDeleteTarget} />

@@ -90,6 +90,7 @@ export const useGallerySemanticImageQuery = (value: unknown) =>
 
 export const GalleryWidgetView = ({ presentation, region, runtime }: GalleryWidgetProps) => {
   const {
+    currentUserId,
     gallery: galleryCommands,
     galleryValues,
     generateValues,
@@ -252,6 +253,7 @@ export const GalleryWidgetView = ({ presentation, region, runtime }: GalleryWidg
         gallery={gallery}
         isWindowTruncated={data.isWindowTruncated}
         listing={data.listing}
+        currentUserId={currentUserId ?? null}
         loadedItems={loadedItems}
         projectId={projectId}
         projectName={projectName}
@@ -300,6 +302,7 @@ const getGalleryFailureAnnouncement = (
 const GalleryWidgetContent = ({
   actions,
   boardsState,
+  currentUserId,
   filter,
   gallery,
   isWindowTruncated,
@@ -322,6 +325,7 @@ const GalleryWidgetContent = ({
   isWindowTruncated: boolean;
   listing: GalleryListingState;
   loadedItems: GalleryItem[];
+  currentUserId: string | null;
   pinRevealIndex: GalleryData['pinRevealIndex'];
   projectId: string;
   projectName: string;
@@ -339,6 +343,7 @@ const GalleryWidgetContent = ({
     () => ({
       actions,
       boardsState,
+      currentUserId,
       filter,
       gallery,
       isWindowTruncated,
@@ -358,6 +363,7 @@ const GalleryWidgetContent = ({
     [
       actions,
       boardsState,
+      currentUserId,
       filter,
       gallery,
       isWindowTruncated,
