@@ -86,6 +86,17 @@ RX 9060 XT (ROCm on Windows): the server's default expandable segments, then the
     python scripts/calibrate_z_image_working_memory.py --out 9060xt-checks.jsonl --mode math
     python scripts/calibrate_z_image_working_memory.py --out 9060xt-checks.jsonl --mode control
 
+Radeon Pro W7900 (ROCm on Linux): the server's default native allocator, then expandable segments, then
+`hipMallocAsync`, which torch on HIP takes and reports as `cudaMallocAsync`; the checks once. The builder takes the
+native points only, until `platform.MEASURED` lists the other two on Linux.
+
+    python scripts/calibrate_z_image_working_memory.py --out w7900-native.jsonl --extra-blocks 4
+    python scripts/calibrate_z_image_working_memory.py --out w7900-expandable.jsonl \
+        --alloc-conf expandable_segments:True
+    python scripts/calibrate_z_image_working_memory.py --out w7900-async.jsonl --alloc-conf backend:cudaMallocAsync
+    python scripts/calibrate_z_image_working_memory.py --out w7900-checks.jsonl --mode math
+    python scripts/calibrate_z_image_working_memory.py --out w7900-checks.jsonl --mode control
+
 `--dry-run` prints the planned points without touching a device.
 """
 

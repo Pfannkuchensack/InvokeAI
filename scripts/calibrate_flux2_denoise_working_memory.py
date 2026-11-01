@@ -93,8 +93,27 @@ RTX 4090 (CUDA): the native allocator, then `cudaMallocAsync`; the math check on
 RX 9060 XT (ROCm on Windows): the server's default expandable segments, then the native allocator; the math check once.
 
     python scripts/calibrate_flux2_denoise_working_memory.py --out 9060xt-expandable.jsonl --extra-blocks 4
+    python scripts/calibrate_flux2_denoise_working_memory.py --out 9060xt-expandable-large.jsonl --mode large
     python scripts/calibrate_flux2_denoise_working_memory.py --out 9060xt-native.jsonl --alloc-conf expandable_segments:False
+    python scripts/calibrate_flux2_denoise_working_memory.py --out 9060xt-native-large.jsonl --mode large \
+        --alloc-conf expandable_segments:False
     python scripts/calibrate_flux2_denoise_working_memory.py --out 9060xt-checks.jsonl --mode math
+
+Radeon Pro W7900 (ROCm on Linux): the server's default native allocator, then expandable segments, then
+`hipMallocAsync`, which torch on HIP takes and reports as `cudaMallocAsync`; the math check once. The builder takes the
+native points only, until `platform.MEASURED` lists the other two on Linux.
+
+    python scripts/calibrate_flux2_denoise_working_memory.py --out w7900-native.jsonl --extra-blocks 4
+    python scripts/calibrate_flux2_denoise_working_memory.py --out w7900-native-large.jsonl --mode large
+    python scripts/calibrate_flux2_denoise_working_memory.py --out w7900-expandable.jsonl \
+        --alloc-conf expandable_segments:True
+    python scripts/calibrate_flux2_denoise_working_memory.py --out w7900-expandable-large.jsonl --mode large \
+        --alloc-conf expandable_segments:True
+    python scripts/calibrate_flux2_denoise_working_memory.py --out w7900-async.jsonl \
+        --alloc-conf backend:cudaMallocAsync
+    python scripts/calibrate_flux2_denoise_working_memory.py --out w7900-async-large.jsonl --mode large \
+        --alloc-conf backend:cudaMallocAsync
+    python scripts/calibrate_flux2_denoise_working_memory.py --out w7900-checks.jsonl --mode math
 
 `--dry-run` prints the planned points without touching a device, each priced as a CPU prices it, e.g.
 

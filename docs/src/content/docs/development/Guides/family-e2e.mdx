@@ -123,6 +123,59 @@ uv run --no-sync python -m scripts.working_memory.build_shipped <data_dir>/runs/
   - any point of the result breaks its bounds (`working_memory/bounds.py`, the rule the data test applies); the error lists them;
   - with `--write`, a line is raised on a point flagged as fragmentation, unless `--accept-fragmentation` is given.
 
+### Measuring a new platform
+
+The fresh-process points of the denoise lines come from three scripts, which append them to the point file `--out` names. Each point runs in a process of its own with the server's runtime (`apply_server_runtime` in `invokeai/app/run_app.py`) on a random-init transformer of the real geometry, so only `--mode real` needs a model. The other `scripts/calibrate_*_working_memory.py` print tables, some also a CSV, and write no point file. VAE points of a new platform come from calibration runs in a server and their exports (see [Working-memory calibration](#working-memory-calibration)); those raise a line but never cap it. Run the scripts from the repository root with the checkout's environment; unlike the tool, they run on ROCm under Linux too.
+
+| Script | Per allocator | Once per card |
+| --- | --- | --- |
+| `scripts/calibrate_z_image_working_memory.py` | `fit` | `--mode math`, `--mode control` |
+| `scripts/calibrate_flux2_denoise_working_memory.py` | `fit`, `--mode large` | `--mode math` |
+| `scripts/calibrate_flux3_denoise_working_memory.py` | `fit`, `--mode large` | `--mode math`, `--mode real --checkpoint FILE` |
+
+- `fit` is the default mode. Add `--extra-blocks 4` to a card's first `fit` run. Run the once-per-card checks under the platform's default allocator.
+- `--mode real` measures the released FLUX.3 Klein or Klein Base from a bf16 safetensors single file in BFL's layout, with ~10.3 GiB of weights on the card; it refuses any other checkpoint (GGUF, another dtype).
+- `--dry-run` prints the planned points without touching a device. A point whose estimate plus weights exceeds free device memory is skipped. `--force` runs it anyway, but where the driver backs an oversized allocation with system memory (NVIDIA's sysmem fallback, AMD on Windows) it pages and can stall the whole machine.
+- A script measures the first GPU torch sees; pin the card with `CUDA_VISIBLE_DEVICES` or `HIP_VISIBLE_DEVICES`. `--alloc-conf` takes what the server's `pytorch_cuda_alloc_conf` takes and goes to `PYTORCH_CUDA_ALLOC_CONF`, which HIP builds read too; without it the platform's default applies. It is refused while `PYTORCH_ALLOC_CONF`, `PYTORCH_CUDA_ALLOC_CONF` or `PYTORCH_HIP_ALLOC_CONF` is set.
+
+Run the allocators in this order, the first without `--alloc-conf`:
+
+| Platform | Allocators (`--alloc-conf`) | What the builder does with the points |
+| --- | --- | --- |
+| CUDA | native (none), then `cudaMallocAsync` (`backend:cudaMallocAsync`) | Both ship, for every OS. |
+| ROCm on Windows | expandable segments, Invoke's default there (none), then native (`expandable_segments:False`) | Both ship, into the Windows entries. |
+| ROCm on Linux | native (none), then expandable segments (`expandable_segments:True`), then `hipMallocAsync` (`backend:cudaMallocAsync`) | Native ships, into the entries for every OS but Windows. The other two are refused. |
+
+A HIP build takes `hipMallocAsync` as `backend:cudaMallocAsync` and reports it under that name, which the server's allocator check compares with; `backend:hipMallocAsync` fails that check.
+
+- **Listed platforms only.** The builder takes points of the platforms `platform.MEASURED` lists: cuDNN with the native allocator or `cudaMallocAsync`, MIOpen with the native allocator, and MIOpen with expandable segments on Windows. A point of any other platform, such as MIOpen with expandable segments or `hipMallocAsync` on Linux, fails the whole build with exit code 2 and nothing written, so keep those files out of `--points`. A server prices those platforms as MIOpen with the native allocator, raised to that entry's `unmeasured_floor` where it declares one. Their points can ship only after a code change: the platform in `MEASURED`, a coefficient entry on it for every estimator keyed by platform (the denoise and VAE estimators; the data test resolves each on every measured platform), and the data test and the [model manager architecture](/development/architecture/model-manager/) updated where they name the measured platforms.
+- **ROCm on Linux, native.** No entry names Linux, so the points name no OS and join the entries for every OS but Windows. FLUX.3's is a fit (Radeon Pro W7900) that new points refit like any other. Z-Image's and FLUX.2's are `legacy` until the points measure every line they carry, every dtype for Z-Image and every width for FLUX.2, as the full `fit` grid does (see Legacy entries above).
+
+ROCm on Linux, FLUX.3 (`<card>` names the card):
+
+```
+python scripts/calibrate_flux3_denoise_working_memory.py --out <card>-native.jsonl --extra-blocks 4
+python scripts/calibrate_flux3_denoise_working_memory.py --out <card>-native-large.jsonl --mode large
+python scripts/calibrate_flux3_denoise_working_memory.py --out <card>-checks.jsonl --mode math
+python scripts/calibrate_flux3_denoise_working_memory.py --out <card>-real.jsonl --mode real --checkpoint /path/to/flux3_image_klein_bf16.safetensors
+python scripts/calibrate_flux3_denoise_working_memory.py --out <card>-expandable.jsonl --alloc-conf expandable_segments:True
+python scripts/calibrate_flux3_denoise_working_memory.py --out <card>-expandable-large.jsonl --mode large --alloc-conf expandable_segments:True
+python scripts/calibrate_flux3_denoise_working_memory.py --out <card>-async.jsonl --alloc-conf backend:cudaMallocAsync
+python scripts/calibrate_flux3_denoise_working_memory.py --out <card>-async-large.jsonl --mode large --alloc-conf backend:cudaMallocAsync
+```
+
+FLUX.2 runs the same without `real`; Z-Image runs `fit` alone per allocator and `--mode control` beside `--mode math`. Each script's docstring lists its commands per platform.
+
+The files are named `<card>-<allocator>[-large].jsonl`, with `native`, `expandable` or `async`, and `<card>-checks.jsonl` and `<card>-real.jsonl`. A script appends, so the three scripts can share these files, as each record names its estimator; a measurement given twice keeps its larger reading. Build from the files that can ship, review the printed changes, then write and test:
+
+```
+uv run --no-sync python -m scripts.working_memory.build_shipped --points <card>-native.jsonl <card>-native-large.jsonl <card>-checks.jsonl <card>-real.jsonl
+uv run --no-sync python -m scripts.working_memory.build_shipped --points <card>-native.jsonl <card>-native-large.jsonl <card>-checks.jsonl <card>-real.jsonl --write
+uv run --no-sync pytest tests/backend/working_memory
+```
+
+Update the data test's `OUT_OF_FIT` and `LEGACY_ENTRIES` as described above, and the estimator's section of the [model manager architecture](/development/architecture/model-manager/), which names the cards and platforms its lines are measured on.
+
 ## Bundle
 
 `bundle` writes one zip that opens without this machine's data, by default `<run_dir>/<run_id>.zip`, and prints its path and size. Apart from that default zip, the run directory stays as it is. It refuses while the run's runner is alive. A stopped or failed run can be bundled, and its report states the status; a run whose runner died without recording it shows as interrupted.
