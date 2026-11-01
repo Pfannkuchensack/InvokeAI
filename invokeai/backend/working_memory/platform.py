@@ -42,7 +42,8 @@ MEASURED: Final = frozenset(
     }
 )
 """The (convolution backend, allocator, OS) combinations coefficients are measured on, None for every OS. Shipped data
-carries entries for these only."""
+carries entries for these only. A point measured on another platform ships as a check of the pricing `priced_as` gives
+it, out of every fit (`bounds.unmeasured_platform_of`)."""
 
 
 def is_measured(platform: Platform) -> bool:

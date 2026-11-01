@@ -24,13 +24,19 @@ not is raised by the least that keeps the upper bounds of the points priced on i
 bounds and each line has a point that holds the upper bound, a fresh-process one: probe windows alone never replace
 hand-set values. It keeps them otherwise.
 
+A point, from an export or a point file, of a platform `platform.MEASURED` does not list ships as a check of the pricing
+that platform borrows (`bounds.is_unmeasured_platform`): out of the fit whatever its record says, naming its whole
+platform, the OS included, and bounding the estimate `priced_as` gives it from below only. It neither raises nor lowers
+a line. One the borrowed pricing does not cover fails the bounds: the borrowed line has to stay above it, or that
+platform needs a `platform.MEASURED` entry and coefficient entries of its own first.
+
 Without `--write` the changes are printed only. Exit status 2 refuses input the build cannot use: an export or point of
-another estimator version than the registered spec, features the spec's terms cannot evaluate, a platform
-`platform.MEASURED` does not list, or fresh-process points too few for a line. Exit status 1 refuses data that conflicts
-with the bounds, after printing the changes it would make, and writes nothing: points no line at or above the fit can
-cover within those upper bounds, with the points that conflict named; a result any point's bounds
-(`working_memory/bounds.py`, the data test's rule) reject; and a line raised on a point flagged as fragmentation unless
-`--accept-fragmentation` is given.
+another estimator version than the registered spec, features the spec's terms cannot evaluate, a point of an unmeasured
+platform with a `max_ratio` or without its OS, or fresh-process points too few for a line. Exit status 1 refuses data
+that conflicts with the bounds, after printing the changes it would make, and writes nothing: points no line at or
+above the fit can cover within those upper bounds, with the points that conflict named; a result any point's bounds
+(`working_memory/bounds.py`, the data test's rule) reject, an unmeasured platform's point its pricing does not cover
+included; and a line raised on a point flagged as fragmentation unless `--accept-fragmentation` is given.
 """
 
 from __future__ import annotations
@@ -53,7 +59,14 @@ from invokeai.app.services.working_memory_calibration.working_memory_calibration
     CalibrationPoint,
     CalibrationStoreFile,
 )
-from invokeai.backend.working_memory.bounds import bound_violation, evaluate_point, line_bounds, point_id
+from invokeai.backend.working_memory.bounds import (
+    bound_violation,
+    evaluate_point,
+    is_unmeasured_platform,
+    line_bounds,
+    point_id,
+    unmeasured_platform_of,
+)
 from invokeai.backend.working_memory.coefficients import (
     CoefficientEntry,
     MeasuredPoint,
@@ -80,8 +93,8 @@ from invokeai.backend.working_memory.platform import (
     ConvBackend,
     OperatingSystem,
     Platform,
-    is_measured,
     platform_for_environment,
+    priced_as,
 )
 from invokeai.backend.working_memory.spec import EstimatorSpec, import_estimator_modules
 
@@ -167,9 +180,16 @@ def point_identity(point: MeasuredPoint) -> PointIdentity:
     )
 
 
-def point_platform(platform: Platform, entries: Sequence[CoefficientEntry]) -> dict[str, str]:
-    """The platform keys a point names: all of `platform`, the OS only where an entry that applies there names it."""
+def point_platform(spec: EstimatorSpec, platform: Platform, entries: Sequence[CoefficientEntry]) -> dict[str, str]:
+    """The platform keys a point of `spec` measured on `platform` names: all of `platform`, the OS only where an entry
+    that applies there names it. An unmeasured platform (`bounds.is_unmeasured_platform`) keeps its OS: no entry applies
+    there, and the OS selects the entries it is priced with (`priced_as`). A spec keyed by no platform trait reads one
+    entry alike everywhere, and its points name no platform."""
+    if not spec.platform_keys:
+        return {}
     full = {key: str(value) for key, value in asdict(platform).items()}
+    if is_unmeasured_platform(spec, platform):
+        return full
     os_specific = any(
         "os" in entry.platform and all(full.get(key) == value for key, value in entry.platform.items())
         for entry in entries
@@ -221,6 +241,8 @@ def build_points(
     """The `probe_demand` points of the exports' valid, fit-eligible windows, and what was left out."""
     groups: dict[tuple[str, str, int, str, str], list[_Window]] = {}
     platforms: dict[tuple[str, str, int, str, str], dict[str, str]] = {}
+    # The groups of a platform `platform.MEASURED` does not list: checks of the pricing it borrows, out of the fit.
+    checks: set[tuple[str, str, int, str, str]] = set()
     skipped: Counter[str] = Counter()
     seen: set[str] = set()
     for path in exports:
@@ -266,15 +288,11 @@ def build_points(
                 # Recorded by a server that does not record every fact the platform is read from.
                 skipped["no platform facts"] += 1
                 continue
-            if not is_measured(platform):
-                raise BuildError(
-                    f"{path}: measured on {platform}, which `platform.MEASURED` does not list; ship coefficient "
-                    "entries for it first"
-                )
-            # A spec keyed by no platform trait reads one entry alike everywhere, and its points name no platform.
-            keys = point_platform(platform, entries) if spec.platform_keys else {}
+            keys = point_platform(spec, platform, entries)
             group = (device, window.estimator, window.version, _canonical(keys), _canonical(window.features))
             platforms[group] = keys
+            if is_unmeasured_platform(spec, platform):
+                checks.add(group)
             attempt = attempts.get(window.run_id, window.run_id)
             groups.setdefault(group, []).append(_Window(window, env, device, path, attempt))
 
@@ -299,6 +317,7 @@ def build_points(
                 method=METHOD,
                 device=best.device,
                 provenance=_provenance(best, len(windows)),
+                in_fit=group not in checks,
             )
         )
         spreads[point_identity(points[-1])] = Spread(
@@ -345,9 +364,10 @@ def _fragmented_attempts(
     return {key for key, flag in zip(keys, fragmented(measurements), strict=True) if flag}
 
 
-def _record_platform(where: str, platform: Mapping[str, str], entries: Sequence[CoefficientEntry]) -> dict[str, str]:
-    """A point file record's platform as the data names it (`point_platform`). A record names the OS where it measured
-    an OS-specific entry's platform, and may name it anywhere; one that does not measured what holds on every OS."""
+def _record_platform(where: str, platform: Mapping[str, str], spec: EstimatorSpec) -> Platform:
+    """The platform a point file record of `spec` was measured on. A record may name the OS anywhere; one that does not
+    measured what holds on every OS, so it must name a platform measured for every OS. A record of an unmeasured
+    platform (`bounds.is_unmeasured_platform`) without its OS is refused: there the OS selects the pricing it checks."""
     named = {"os": "other"} | dict(platform)
     choices = {"conv_backend": ConvBackend, "allocator": Allocator, "os": OperatingSystem}
     problems = [f"no {key}" for key in sorted(choices.keys() - named.keys())] + [
@@ -356,12 +376,12 @@ def _record_platform(where: str, platform: Mapping[str, str], entries: Sequence[
     if problems:
         raise BuildError(f"{where}: platform {dict(platform)} is no platform the data keys points by: {problems}")
     measured = Platform(**named)  # type: ignore[arg-type]
-    if not is_measured(measured):
+    if "os" not in platform and is_unmeasured_platform(spec, measured):
         raise BuildError(
-            f"{where}: measured on {measured}, which `platform.MEASURED` does not list; ship coefficient entries for "
-            "it first"
+            f"{where}: platform {dict(platform)} names no OS, and `platform.MEASURED` does not list it for every OS: "
+            "name the OS it was measured on, which selects the pricing its point checks"
         )
-    return point_platform(measured, entries)
+    return measured
 
 
 def read_point_files(
@@ -373,7 +393,8 @@ def read_point_files(
     A record is a JSON object on a line of its own: a `MeasuredPoint`'s fields (`estimator`, `version`, `platform`,
     `features`, `measured_bytes`, `method`, `device`, `provenance`, optionally `in_fit` and `max_ratio`) and any other
     keys, which are ignored. A fresh-process point holds the upper bound, so a `probe_demand` record is refused: probe
-    windows come from exports.
+    windows come from exports. A record of a platform `platform.MEASURED` does not list becomes a check of the pricing
+    that platform borrows, out of the fit; one with a `max_ratio` is refused, since that pricing is no fit of its own.
     """
     best: dict[PointIdentity, MeasuredPoint] = {}
     skipped: Counter[str] = Counter()
@@ -405,7 +426,16 @@ def read_point_files(
                 )
             spec = _registered_spec(where, point.estimator, point.version, specs)
             _check_features(where, point.features, spec)
-            point = point.model_copy(update={"platform": _record_platform(where, point.platform, entries)})
+            platform = _record_platform(where, point.platform, spec)
+            update: dict[str, Any] = {"platform": point_platform(spec, platform, entries)}
+            if is_unmeasured_platform(spec, platform):
+                if point.max_ratio is not None:
+                    raise BuildError(
+                        f"{where}: measured on {platform}, which `platform.MEASURED` does not list: such a point "
+                        "bounds the pricing that platform borrows from below only and takes no max_ratio"
+                    )
+                update["in_fit"] = False
+            point = point.model_copy(update=update)
             identity = point_identity(point)
             kept = best.get(identity)
             if kept is not None:
@@ -572,14 +602,35 @@ def legacy_notes(
     return notes
 
 
-def bound_violations(data: Mapping[str, WorkingMemoryData], specs: Mapping[str, EstimatorSpec]) -> list[str]:
-    """Every point of `data` whose estimate under `data` breaks a bound it sets (`bounds.bound_violation`)."""
+def bound_violations(
+    data: Mapping[str, WorkingMemoryData],
+    specs: Mapping[str, EstimatorSpec],
+    before: Mapping[str, WorkingMemoryData] | None = None,
+) -> list[str]:
+    """Every point of `data` whose estimate under `data` breaks a bound it sets (`bounds.bound_violation`). For a point
+    of an unmeasured platform, also what that platform is priced as, and that it needs entries of its own; where the
+    values `before` the build covered it, also that the refit dropped the borrowed line below it."""
     violations = []
     for point in (point for file in data.values() for point in file.points):
         spec = specs[point.estimator]
         violation = bound_violation(point, spec, evaluate_point(point, spec, data.values()))
-        if violation is not None:
-            violations.append(f"{point_id(point, spec)}: {violation}")
+        if violation is None:
+            continue
+        unmeasured = unmeasured_platform_of(point, spec)
+        if unmeasured is not None:
+            own = "a `platform.MEASURED` entry and coefficient entries of its own"
+            violation += f"; {unmeasured} is priced as {priced_as(unmeasured)}, which does not cover it"
+            if (
+                before is not None
+                and bound_violation(point, spec, evaluate_point(point, spec, before.values())) is None
+            ):
+                violation += (
+                    f", though the values before this build did: keep the borrowed line from dropping below it, or "
+                    f"give the platform {own}"
+                )
+            else:
+                violation += f": it needs {own} first"
+        violations.append(f"{point_id(point, spec)}: {violation}")
     return violations
 
 
@@ -812,7 +863,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     if conflict is not None:
         print(f"error: not written: the points conflict with the bounds: {conflict}", file=sys.stderr)
         return 1
-    violations = bound_violations(after, specs)
+    violations = bound_violations(after, specs, before)
     reviews = review_lines(before, after, new_points, specs)
     for change in reviews:
         (old_k, old_b), (new_k, new_b) = change.old, change.new

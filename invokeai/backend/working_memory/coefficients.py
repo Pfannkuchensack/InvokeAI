@@ -117,7 +117,9 @@ class MeasuredPoint(_DataModel):
     """False for a point whose demand is not its line's alone, kept to check another term: one measured in a regime its
     platform does not run (CUDA with the math attention kernel forced, whose score matrix shares the forward with the
     convolutions), or one whose features carry a term on top of the line (`fit.Line.fits`), such as the score matrix a
-    build's own SDPA kernel materializes. The fit leaves it out, and it gets the lower bound only."""
+    build's own SDPA kernel materializes. Also false for every point of a platform `platform.MEASURED` does not list,
+    which checks the pricing that platform borrows (`bounds.unmeasured_platform_of`). The fit leaves it out, and it gets
+    the lower bound only."""
 
     @model_validator(mode="after")
     def _max_ratio_needs_an_upper_bound(self) -> Self:

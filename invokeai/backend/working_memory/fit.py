@@ -277,7 +277,9 @@ def fit_points(
 
 def carrier_of(entries: Sequence[CoefficientEntry], point: MeasuredPoint) -> CoefficientEntry:
     """The entry that carries the values `point` is evaluated with: its estimator's entry on its platform, or the one
-    that entry borrows from. A point names the OS only where it measured an OS-specific entry's platform."""
+    that entry borrows from. Only for a point of a measured platform, which names the OS only where it measured an
+    OS-specific entry's platform. A point of an unmeasured one (`bounds.is_unmeasured_platform`) keeps its OS but is
+    out of every fit and sets no upper bound, so it never comes here: no entry is its own."""
     where = f"{point.estimator} point on {point.platform}"
     entry = find_entry(entries, point.estimator, point.version, point.platform, where)
     if entry.values_from is None:

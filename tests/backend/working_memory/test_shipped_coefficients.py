@@ -6,7 +6,9 @@ in `LEGACY_ENTRIES`, or decided by at least one in-fit point and, on a line its 
 (`fit.py`) of the points it is resolved for; only an estimator keyed by no platform trait carries values off one. Every
 point bounds its estimate as `working_memory/bounds.py` says: from below always, from above where a fitted term decides
 an in-fit point that holds an upper bound (a fresh-process peak, not a `probe_demand` window). The points no line can
-hold within 1.3x are listed in `bounds.UPPER_BOUND_EXCEPTIONS`; the out-of-fit ones in `OUT_OF_FIT`.
+hold within 1.3x are listed in `bounds.UPPER_BOUND_EXCEPTIONS`; the out-of-fit ones in `OUT_OF_FIT`, but for the points
+of platforms `platform.MEASURED` does not list: those are out of the fit by what they measured, and bound the estimate
+that platform is priced with from below only (`bounds.unmeasured_platform_of`).
 """
 
 import collections
@@ -32,6 +34,7 @@ from invokeai.backend.working_memory.bounds import (
     evaluate_point,
     line_bounds,
     point_id,
+    unmeasured_platform_of,
 )
 from invokeai.backend.working_memory.coefficients import (
     CoefficientEntry,
@@ -86,7 +89,8 @@ check the score-matrix term, and the FLUX.3 denoise's checks. Those are the real
 hold the 2-block lines to the released model from below, and on the W7900 the forced-math forward, which checks the
 score-matrix term, and the 4-block forward. That one stands for the real Klein's 1024px forward and the math check's
 default-kernel one, out-of-fit points of the same features that demanded no more: the builder ships the larger of one
-measurement (`build_shipped.point_identity`). A point that leaves the fit needs an edit here."""
+measurement (`build_shipped.point_identity`). A point that leaves the fit needs an edit here. The points of unmeasured
+platforms are not listed: what they measured keeps them out of the fit, which their own test holds."""
 
 LEGACY_ENTRIES = {
     ("denoise.z_image", (("allocator", "native"), ("conv_backend", "miopen"))),
@@ -265,9 +269,21 @@ def test_a_stand_in_is_a_whole_line_its_fresh_process_points_cannot_fit() -> Non
 def test_the_out_of_fit_points_are_the_listed_ones() -> None:
     """Leaving the fit removes a point's upper bound, so it is never a quiet flag flip."""
     out_of_fit = collections.Counter(
-        (tuple(sorted(point.platform.items())), point.device, point.method) for point in ALL_POINTS if not point.in_fit
+        (tuple(sorted(point.platform.items())), point.device, point.method)
+        for point in ALL_POINTS
+        if not point.in_fit and unmeasured_platform_of(point, SPECS[point.estimator]) is None
     )
     assert out_of_fit == OUT_OF_FIT
+
+
+def test_a_point_of_an_unmeasured_platform_checks_its_pricing_from_below_only() -> None:
+    """No entry is fitted for such a platform: the point checks what `priced_as` and the lender's floor give it, which
+    may be generous by design. So it stays out of every fit and takes no upper bound, and it names its OS, which selects
+    the entries the platform borrows: without it, a Linux point would read as one on every OS."""
+    for point in ALL_POINTS:
+        if unmeasured_platform_of(point, SPECS[point.estimator]) is not None:
+            assert not point.in_fit and point.max_ratio is None, _id(point)
+            assert "os" in point.platform, _id(point)
 
 
 def test_every_listed_upper_bound_exception_is_a_shipped_point_that_needs_it() -> None:

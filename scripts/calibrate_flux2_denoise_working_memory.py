@@ -100,8 +100,8 @@ RX 9060 XT (ROCm on Windows): the server's default expandable segments, then the
     python scripts/calibrate_flux2_denoise_working_memory.py --out 9060xt-checks.jsonl --mode math
 
 Radeon Pro W7900 (ROCm on Linux): the server's default native allocator, then expandable segments, then
-`hipMallocAsync`, which torch on HIP takes and reports as `cudaMallocAsync`; the math check once. The builder takes the
-native points only, until `platform.MEASURED` lists the other two on Linux.
+`hipMallocAsync`, which torch on HIP takes and reports as `cudaMallocAsync`; the math check once. The builder ships the
+other two as checks of the native-allocator pricing they borrow, out of the fit.
 
     python scripts/calibrate_flux2_denoise_working_memory.py --out w7900-native.jsonl --extra-blocks 4
     python scripts/calibrate_flux2_denoise_working_memory.py --out w7900-native-large.jsonl --mode large

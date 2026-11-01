@@ -87,8 +87,8 @@ RX 9060 XT (ROCm on Windows): the server's default expandable segments, then the
     python scripts/calibrate_z_image_working_memory.py --out 9060xt-checks.jsonl --mode control
 
 Radeon Pro W7900 (ROCm on Linux): the server's default native allocator, then expandable segments, then
-`hipMallocAsync`, which torch on HIP takes and reports as `cudaMallocAsync`; the checks once. The builder takes the
-native points only, until `platform.MEASURED` lists the other two on Linux.
+`hipMallocAsync`, which torch on HIP takes and reports as `cudaMallocAsync`; the checks once. The builder ships the
+other two as checks of the native-allocator pricing they borrow, out of the fit.
 
     python scripts/calibrate_z_image_working_memory.py --out w7900-native.jsonl --extra-blocks 4
     python scripts/calibrate_z_image_working_memory.py --out w7900-expandable.jsonl \

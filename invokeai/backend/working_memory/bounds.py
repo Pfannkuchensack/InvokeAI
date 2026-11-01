@@ -5,6 +5,8 @@ data to it, and by `scripts/working_memory/build_shipped.py`, which refuses to w
 
 - Lower bound. The model cache consumes an estimate as ``free >= estimate``, so the estimate must be at least the point.
   Where only analytic terms decide it (a materialized score matrix), the cache's `device_working_mem_gb` floor counts.
+  A point of a platform `platform.MEASURED` does not list sets this bound alone, on the estimate that platform is
+  priced with (`is_unmeasured_platform`).
 - Upper bound, for points that hold one (`MeasuredPoint.holds_upper_bound`): where a fitted term decides an in-fit
   point, the estimate is at most `MAX_OVER_RESERVATION` times the point, its listed `UPPER_BOUND_EXCEPTIONS` ratio, or
   its tighter `max_ratio`, which applies whichever term decides. A reservation the operation never uses is model
@@ -24,7 +26,7 @@ from invokeai.app.services.config.config_default import InvokeAIAppConfig
 from invokeai.backend.working_memory.coefficients import MeasuredPoint, WorkingMemoryData, resolve_coefficients
 from invokeai.backend.working_memory.estimate import WorkingMemoryEstimate
 from invokeai.backend.working_memory.fit import LineBound, LineKey, carried_lines, carrier_of, entry_key
-from invokeai.backend.working_memory.platform import Platform
+from invokeai.backend.working_memory.platform import Platform, is_measured
 
 if TYPE_CHECKING:
     from invokeai.backend.working_memory.spec import EstimatorSpec
@@ -97,6 +99,22 @@ def _platform_of(point: MeasuredPoint, spec: "EstimatorSpec") -> Platform:
     if not spec.platform_keys:
         return _ANY_PLATFORM
     return Platform(**({"os": "other"} | point.platform))  # type: ignore[arg-type]
+
+
+def is_unmeasured_platform(spec: "EstimatorSpec", platform: Platform) -> bool:
+    """Whether a point of `spec` measured on `platform` is on a platform `platform.MEASURED` does not list.
+
+    Such a point checks the pricing that platform borrows (`priced_as`, raised to the lender's `unmeasured_floor`), not
+    a line: it is out of the fit and takes no `max_ratio`, so it bounds its estimate from below only, as that pricing
+    may be generous by design. It names its whole platform, the OS included, which selects among the entries the
+    platform borrows. An estimator keyed by no platform trait prices every platform alike: no point of it is on one."""
+    return bool(spec.platform_keys) and not is_measured(platform)
+
+
+def unmeasured_platform_of(point: MeasuredPoint, spec: "EstimatorSpec") -> Optional[Platform]:
+    """The platform `point` was measured on where it is unmeasured (`is_unmeasured_platform`), else None."""
+    platform = _platform_of(point, spec)
+    return platform if is_unmeasured_platform(spec, platform) else None
 
 
 def evaluate_point(

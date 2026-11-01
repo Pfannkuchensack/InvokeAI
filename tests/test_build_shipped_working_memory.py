@@ -229,7 +229,7 @@ def test_a_points_platform_is_the_one_platform_for_gives_on_the_measuring_machin
     machine(hip, os_name)
     device_class = RX_9060_XT if hip else RTX_4090
     export = _export(tmp_path / "export.json", device_class, [_window(1, _decode(1024), 4 * GIB)])
-    measuring_machine = point_platform(platform_for(CUDA0), entries)
+    measuring_machine = point_platform(specs["vae.flux2"], platform_for(CUDA0), entries)
     # The build runs on another OS than the export was recorded on.
     machine(hip, "linux" if os_name == "windows" else "windows")
 
@@ -240,12 +240,16 @@ def test_a_points_platform_is_the_one_platform_for_gives_on_the_measuring_machin
     assert ("os" in point.platform) == (hip is not None and os_name == "windows")
 
 
-@pytest.mark.parametrize("hip, os_name", [(None, "linux"), ("7.14.0", "windows")])
+@pytest.mark.parametrize(
+    "hip, os_name, alloc_conf",
+    [(None, "linux", None), ("7.14.0", "windows", None), ("7.14.0", "linux", "expandable_segments:True")],
+)
 def test_a_point_of_an_estimator_keyed_by_no_platform_names_no_platform(
-    hip, os_name, machine, tmp_path: Path, entries, specs
+    hip, os_name, alloc_conf, machine, tmp_path: Path, entries, specs
 ) -> None:
-    # MOSS-Image's denoise entry reads alike on every platform; ROCm on Windows names even its OS for a VAE point.
-    machine(hip, os_name)
+    # MOSS-Image's denoise entry reads alike on every platform; ROCm on Windows names even its OS for a VAE point, and
+    # Linux with expandable segments makes a VAE point an out-of-fit check.
+    machine(hip, os_name, alloc_conf)
     features = {"height": 1024, "width": 1024, "text_tokens": 64, "score_matrix_bytes": 0, "dequant_bytes": 0}
     window = _window(1, features, 4 * GIB, estimator="moss_image.denoise", version=1)
     export = _export(tmp_path / "export.json", RX_9060_XT if hip else RTX_4090, [window])
@@ -253,6 +257,7 @@ def test_a_point_of_an_estimator_keyed_by_no_platform_names_no_platform(
     [point] = build_points([export], specs, entries).points
 
     assert point.platform == {}
+    assert point.in_fit
 
 
 def test_a_window_whose_environment_lacks_a_platform_fact_is_left_out(machine, tmp_path: Path, entries, specs) -> None:
@@ -341,6 +346,7 @@ def shipped_checks(monkeypatch: pytest.MonkeyPatch) -> Iterator[Callable[[Path],
         checks.test_only_the_listed_entries_ship_hand_set_values()
         checks.test_a_stand_in_is_a_whole_line_its_fresh_process_points_cannot_fit()
         checks.test_the_out_of_fit_points_are_the_listed_ones()
+        checks.test_a_point_of_an_unmeasured_platform_checks_its_pricing_from_below_only()
         checks.test_every_listed_upper_bound_exception_is_a_shipped_point_that_needs_it()
         checks.test_a_point_bound_is_never_looser_than_the_default()
         for estimator in checks.SPECS.values():
@@ -997,24 +1003,190 @@ def test_a_measurement_a_point_file_gives_twice_keeps_its_larger_reading(tmp_pat
     assert build.skipped == {"remeasured, the larger kept": 1}
 
 
+MIOPEN_EXPANDABLE_LINUX = {"conv_backend": "miopen", "allocator": "expandable", "os": "linux"}
+
+
 @pytest.mark.parametrize(
     "changes, message",
     [
         pytest.param({"method": "probe_demand"}, "bounds its estimate from below only", id="probe-window"),
         pytest.param(
-            {"platform": {"conv_backend": "cudnn", "allocator": "expandable", "os": "linux"}},
-            "which `platform.MEASURED` does not list",
-            id="unmeasured-platform",
+            {"platform": MIOPEN_EXPANDABLE_LINUX, "max_ratio": 1.2}, "takes no max_ratio", id="unmeasured-upper-bound"
+        ),
+        pytest.param(
+            {"platform": {"conv_backend": "miopen", "allocator": "expandable"}}, "names no OS", id="unmeasured-no-os"
         ),
     ],
 )
-def test_a_record_that_is_no_fresh_process_point_of_a_measured_platform_is_refused(
+def test_a_record_that_claims_an_upper_bound_it_cannot_hold_is_refused(
     changes: dict, message: str, tmp_path: Path, capsys
 ) -> None:
+    """A probe window is a warm reading, and an unmeasured platform's pricing is borrowed, not fitted to its points.
+    Without its OS, such a point does not say which pricing it checks: expandable segments are measured on Windows."""
     points = _point_file(tmp_path / "refused.jsonl", [_forward_record(4096, "bf16", **changes)])
 
     assert main(["--points", str(points), "--data-dir", str(DATA_DIR)]) == 2
     assert message in capsys.readouterr().err
+
+
+def test_a_record_of_an_estimator_keyed_by_no_platform_is_an_ordinary_point_on_any_platform(
+    tmp_path: Path, entries, specs
+) -> None:
+    """MOSS-Image's denoise entry reads alike on every platform, so a platform `MEASURED` does not list makes no check
+    of its point: it names no platform and keeps its place in the fit and its upper bound."""
+    shipped = load_data(DATA_DIR)["moss_image.json"].points[0]
+    record = shipped.model_dump(mode="json") | {
+        "platform": {"conv_backend": "cudnn", "allocator": "expandable", "os": "linux"},
+        "in_fit": True,
+        "max_ratio": 1.2,
+    }
+
+    [point] = read_point_files([_point_file(tmp_path / "moss.jsonl", [record])], specs, entries).points
+
+    assert (point.platform, point.in_fit, point.max_ratio) == ({}, True, 1.2)
+
+
+def _shipped_point(estimator: str, platform: dict[str, str], **features: object) -> MeasuredPoint:
+    [point] = [
+        p
+        for p in load_data(DATA_DIR)["denoise.json"].points
+        if p.estimator == estimator and p.platform == platform and p.in_fit and features.items() <= p.features.items()
+    ]
+    return point
+
+
+def _remeasured_on(point: MeasuredPoint, platform: dict[str, str], measured_bytes: int) -> dict:
+    """`point`'s forward as a calibration script records it on `platform`: OS included, in the fit grid."""
+    return point.model_dump(mode="json") | {"platform": platform, "measured_bytes": measured_bytes, "fit": True}
+
+
+def _line_at(values: dict[str, float], suffix: str, size: int) -> float:
+    return values[f"k_{suffix}"] * size + values[f"b_{suffix}"]
+
+
+def _coefficients(data_dir: Path) -> dict[str, list[CoefficientEntry]]:
+    return {name: file.coefficients for name, file in load_data(data_dir).items()}
+
+
+WINDOWS_FORWARD = {"dtype": "bf16", "image_tokens": 16384, "text_tokens": 512}
+"""The RX 9060 XT's Z-Image forward at 16896 tokens, shipped with expandable segments on Windows."""
+
+
+def test_an_unmeasured_platforms_point_ships_as_a_check_beside_the_windows_point_and_moves_no_value(
+    tmp_path: Path, shipped_checks
+) -> None:
+    """Expandable segments on Linux are priced as the native allocator there: Z-Image's legacy constants, 0.25 MiB per
+    token and 1 GiB. A forward that demanded more than the Windows expandable line prices, with the card and features
+    of a shipped Windows point, ships as an out-of-fit check of that pricing, naming its OS. The Windows point, its
+    line and every other value stay as shipped."""
+    windows = _shipped_point(Z_IMAGE_DENOISE_SPEC.id, MIOPEN_EXPANDABLE_WINDOWS, **WINDOWS_FORWARD)
+    tokens = windows.features["tokens"]
+    assert isinstance(tokens, int)
+    windows_line = _line_at(
+        dict(_denoise_entries(DATA_DIR)["miopen,expandable,windows"].values or {}), "denoise_bf16", tokens
+    )
+    measured = 7 * GIB // 2
+    # The borrowed legacy value reserves over 1.3x the check, which sets no upper bound.
+    assert windows_line < measured < _line_at(LEGACY_DENOISE, "denoise_bf16", tokens) / 1.3
+    points = _point_file(tmp_path / "linux.jsonl", [_remeasured_on(windows, MIOPEN_EXPANDABLE_LINUX, measured)])
+    data_dir, _ = _data_copy(tmp_path)
+
+    assert main(["--points", str(points), "--data-dir", str(data_dir), "--write"]) == 0
+
+    expandable = [
+        p
+        for p in load_data(data_dir)["denoise.json"].points
+        if p.features == windows.features and p.device == windows.device and p.platform["allocator"] == "expandable"
+    ]
+    assert sorted((p.measured_bytes, p.in_fit, p.platform) for p in expandable) == [
+        (windows.measured_bytes, True, MIOPEN_EXPANDABLE_WINDOWS),
+        (measured, False, MIOPEN_EXPANDABLE_LINUX),
+    ]
+    assert _coefficients(data_dir) == _coefficients(DATA_DIR)
+    shipped_checks(data_dir)
+
+
+def test_an_unmeasured_platforms_point_its_pricing_does_not_cover_is_refused(tmp_path: Path, capsys) -> None:
+    windows = _shipped_point(Z_IMAGE_DENOISE_SPEC.id, MIOPEN_EXPANDABLE_WINDOWS, **WINDOWS_FORWARD)
+    points = _point_file(tmp_path / "linux.jsonl", [_remeasured_on(windows, MIOPEN_EXPANDABLE_LINUX, 6 * GIB)])
+    data_dir, before = _data_copy(tmp_path)
+
+    assert main(["--points", str(points), "--data-dir", str(data_dir), "--write"]) == 1
+
+    err = capsys.readouterr().err
+    assert (
+        "denoise.z_image-miopen,expandable,linux-denoise-bf16-16384+512tok-outfit-RX9060XT-demand_peak: reserves "
+        "5.125 GiB for a measured 6.000 GiB; Platform(conv_backend='miopen', allocator='expandable', os='linux') is "
+        "priced as Platform(conv_backend='miopen', allocator='native', os='linux'), which does not cover it: it needs "
+        "a `platform.MEASURED` entry and coefficient entries of its own first"
+    ) in err
+    assert _files(data_dir) == before
+
+
+def test_a_check_the_refit_drops_its_borrowed_line_below_is_refused_and_says_so(tmp_path: Path, capsys) -> None:
+    """Linux native forwards of every dtype at three sizes replace MIOpen's legacy constants there with their fit, which
+    expandable segments on Linux borrow. A check above that fit at 16896 tokens, but under the legacy value, would be
+    priced below its demand: the build refuses and names the drop as the cause."""
+    miopen_native_linux = MIOPEN_NATIVE | {"os": "linux"}
+    forwards = [
+        _forward_record(image, dtype, platform=miopen_native_linux) for dtype in FITTED for image in (1024, 4096, 16384)
+    ]
+    measured = 9 * GIB // 2
+    k, b = FITTED["bf16"]
+    assert k * 16896 + b < measured < _line_at(LEGACY_DENOISE, "denoise_bf16", 16896)
+    check = _forward_record(16384, "bf16", platform=MIOPEN_EXPANDABLE_LINUX, measured_bytes=measured)
+    points = _point_file(tmp_path / "linux.jsonl", [*forwards, check])
+    data_dir, before = _data_copy(tmp_path)
+
+    assert main(["--points", str(points), "--data-dir", str(data_dir), "--write"]) == 1
+
+    captured = capsys.readouterr()
+    assert f"denoise.json: denoise.z_image {MIOPEN_NATIVE} is fitted now, no longer legacy" in captured.out
+    assert (
+        "which does not cover it, though the values before this build did: keep the borrowed line from dropping below "
+        "it, or give the platform a `platform.MEASURED` entry and coefficient entries of its own"
+    ) in captured.err
+    assert _files(data_dir) == before
+
+
+@pytest.mark.parametrize("covered", [True, False], ids=["under-the-floor", "over-the-floor"])
+def test_a_hip_malloc_async_point_is_priced_as_the_native_allocator_raised_to_its_floor(
+    covered: bool, tmp_path: Path
+) -> None:
+    """`hipMallocAsync` on Linux borrows FLUX.3's native-allocator line there, the W7900's, raised to the legacy
+    constants it declares as its floor: a forward above the line but under the floor is covered, one above both not."""
+    native = _shipped_point("denoise.flux3", MIOPEN_NATIVE, dtype="bf16", image_tokens=1024, reference_tokens=0,
+                            text_tokens=560, batch_size=1, flow_map=True)  # fmt: skip
+    [entry] = [
+        e
+        for e in load_data(DATA_DIR)["denoise.json"].coefficients
+        if e.estimator == "denoise.flux3" and e.platform == MIOPEN_NATIVE
+    ]
+    values = dict(entry.values or {})
+    floored = {name: max(value, entry.unmeasured_floor.get(name, value)) for name, value in values.items()}
+    tokens = native.features["tokens"]
+    assert isinstance(tokens, int)
+    line, floor = (_line_at(v, "denoise_bf16_h3072", tokens) for v in (values, floored))
+    measured = int(floor) + (-64 if covered else 64) * MIB
+    assert line < measured
+    hip_async = {"conv_backend": "miopen", "allocator": "cudaMallocAsync", "os": "linux"}
+    points = _point_file(tmp_path / "async.jsonl", [_remeasured_on(native, hip_async, measured)])
+    data_dir, before = _data_copy(tmp_path)
+
+    assert main(["--points", str(points), "--data-dir", str(data_dir), "--write"]) == (0 if covered else 1)
+
+    assert (_files(data_dir) == before) != covered
+
+
+def test_an_unmeasured_platforms_windows_ship_as_checks_naming_its_os(machine, tmp_path: Path, entries, specs) -> None:
+    """A calibration store follows the point files' rule: a Linux RX 9060 XT with expandable segments."""
+    machine("7.14.0", "linux", "expandable_segments:True")
+    export = _export(tmp_path / "export.json", RX_9060_XT, [_window(1, _decode(1024), 4 * GIB)])
+
+    [point] = build_points([export], specs, entries).points
+
+    assert point.platform == MIOPEN_EXPANDABLE_LINUX
+    assert not point.in_fit
 
 
 def test_a_remeasurement_below_the_shipped_point_keeps_it_and_says_so(tmp_path: Path, capsys) -> None:
