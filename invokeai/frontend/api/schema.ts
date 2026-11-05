@@ -48407,6 +48407,11 @@ export type components = {
              * @default []
              */
             previous_names?: string[];
+            /**
+             * Previous Sources
+             * @default []
+             */
+            previous_sources?: string[];
             /** Dependencies */
             dependencies?: components["schemas"]["StarterModelWithoutDependencies"][] | null;
         };
@@ -48452,6 +48457,11 @@ export type components = {
              * @default []
              */
             previous_names?: string[];
+            /**
+             * Previous Sources
+             * @default []
+             */
+            previous_sources?: string[];
         };
         /**
          * Empty Loop State
