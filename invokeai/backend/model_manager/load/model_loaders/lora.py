@@ -62,6 +62,9 @@ from invokeai.backend.patches.lora_conversions.flux_xlabs_lora_conversion_utils 
     is_state_dict_likely_in_flux_xlabs_format,
     lora_model_from_flux_xlabs_state_dict,
 )
+from invokeai.backend.patches.lora_conversions.ideogram4_lora_conversion_utils import (
+    lora_model_from_ideogram4_state_dict,
+)
 from invokeai.backend.patches.lora_conversions.krea2_lora_conversion_utils import (
     lora_model_from_krea2_state_dict,
 )
@@ -231,6 +234,10 @@ class LoRALoader(ModelLoader):
             # ERNIE-Image LoRAs already name the transformer's own (diffusers) modules; only the container
             # prefix is stripped. Without .alpha tensors (ai-toolkit) alpha = rank, i.e. the patch applies unscaled.
             model = lora_model_from_ernie_image_state_dict(state_dict=state_dict)
+        elif self._model_base == BaseModelType.Ideogram4:
+            # Converted onto the vendored transformer every Ideogram 4 build loads into; diffusers' split q/k/v
+            # are fused into its single `attention.qkv`. Without .alpha tensors alpha = rank (unscaled).
+            model = lora_model_from_ideogram4_state_dict(state_dict=state_dict)
         else:
             raise ValueError(f"Unsupported LoRA base model: {self._model_base}")
 
