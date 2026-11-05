@@ -38,7 +38,7 @@ from invokeai.backend.patches.lora_conversions.sd3_lora_constants import (
     sd3_variant_from_width,
 )
 from invokeai.backend.patches.model_patch_raw import ModelPatchRaw
-from invokeai.backend.quantization.dequantizing_linear import requires_sidecar_patching
+from invokeai.backend.quantization.dequantizing_linear import peak_dequant_transient_bytes, requires_sidecar_patching
 from invokeai.backend.rectified_flow.rectified_flow_inpaint_extension import RectifiedFlowInpaintExtension
 from invokeai.backend.stable_diffusion.diffusers_pipeline import PipelineIntermediateState
 from invokeai.backend.stable_diffusion.diffusion.conditioning_data import SD3ConditioningInfo
@@ -335,14 +335,16 @@ class SD3DenoiseInvocation(BaseInvocation, WithMetadata, WithBoard):
         lora_on_device = force_sidecar or (
             bool(lora_patch_specs) and any(p.dtype in FP8_STORAGE_DTYPES for p in transformer_info.model.parameters())
         )
-        # This node has no activation estimate, so the cache floors its request at `device_working_mem_gb`, which then
-        # stands in for the activations. Sidecar patches stay on the device for the whole run, so they come on top of
-        # that floor rather than out of it. Patches merged into the weights leave nothing resident.
-        working_mem_bytes: Optional[int] = None
+        # A GGUF build dequantizes each Linear per forward, a transient its resident size does not cover; zero for a
+        # Diffusers build, which leaves the reservation as it was. This node has no activation estimate, so the cache
+        # floors its request at `device_working_mem_gb`, which then stands in for the activations. Sidecar patches stay
+        # on the device for the whole run, so they come on top of that floor rather than out of it. Patches merged into
+        # the weights leave nothing resident.
+        working_mem_bytes = peak_dequant_transient_bytes(transformer_info.model, inference_dtype)
         if lora_on_device:
             floor = int(context.config.get().device_working_mem_gb * 2**30)
             lora_bytes = sum(spec[0].calc_size() for spec in lora_patch_specs)
-            working_mem_bytes = floor + lora_bytes + _SIDECAR_TRANSIENT_BYTES
+            working_mem_bytes = max(working_mem_bytes, floor) + lora_bytes + _SIDECAR_TRANSIENT_BYTES
 
         with ExitStack() as exit_stack:
             (cached_weights, transformer) = exit_stack.enter_context(
