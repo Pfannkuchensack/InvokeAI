@@ -109,6 +109,80 @@ def test_handler_image_names(tmp_path: Path, monkeypatch: Any, mock_image_dto: I
     )
 
 
+def prepare_two_image_download(tmp_path: Path, monkeypatch: Any, mock_image_dto: ImageDTO, mock_invoker: Invoker):
+    """Patch the invoker for a two-image download; returns the dtos and the disk path lookup to patch."""
+    monkeypatch.setattr("invokeai.app.services.bulk_download.bulk_download_default.uuid_string", lambda: "test")
+
+    first = mock_image_dto
+    second = mock_image_dto.model_copy(update={"image_name": "second_image.png"})
+    dtos = {dto.image_name: dto for dto in (first, second)}
+    monkeypatch.setattr(mock_invoker.services.images, "get_dto", lambda name: dtos[name])
+
+    disk_dir = tmp_path / "images_on_disk"
+    disk_dir.mkdir()
+    for name in dtos:
+        (disk_dir / name).write_text(f"contents of {name}")
+    return list(dtos), disk_dir
+
+
+def test_archive_is_not_downloadable_until_complete(
+    tmp_path: Path, monkeypatch: Any, mock_image_dto: ImageDTO, mock_invoker: Invoker
+):
+    """A client polling get_path must never be handed a half-written archive."""
+    names, disk_dir = prepare_two_image_download(tmp_path, monkeypatch, mock_image_dto, mock_invoker)
+    service = BulkDownloadService()
+    service.start(mock_invoker)
+
+    visible_while_writing: list[bool] = []
+
+    def get_path(name: str) -> str:
+        if name == names[1]:
+            # The first image is already written into the archive at this point.
+            try:
+                service.get_path("test.zip")
+                visible_while_writing.append(True)
+            except BulkDownloadTargetException:
+                visible_while_writing.append(False)
+        return str(disk_dir / name)
+
+    monkeypatch.setattr(mock_invoker.services.images, "get_path", get_path)
+
+    service.handler(names, None, None)
+
+    assert visible_while_writing == [False]
+    with ZipFile(service.get_path("test.zip")) as zip_file:
+        assert zip_file.testzip() is None
+        assert sorted(zip_file.namelist()) == sorted(f"general/{name}" for name in names)
+        for name in names:
+            assert zip_file.read(f"general/{name}").decode() == f"contents of {name}"
+    assert [p.name for p in (tmp_path / "bulk_downloads").iterdir()] == ["test.zip"]
+
+
+def test_failed_archive_leaves_no_file_behind(
+    tmp_path: Path, monkeypatch: Any, mock_image_dto: ImageDTO, mock_invoker: Invoker
+):
+    """If writing fails midway, no partial archive may remain or become downloadable."""
+    names, disk_dir = prepare_two_image_download(tmp_path, monkeypatch, mock_image_dto, mock_invoker)
+    service = BulkDownloadService()
+    service.start(mock_invoker)
+
+    def get_path(name: str) -> str:
+        return str(disk_dir / ("missing.png" if name == names[1] else name))
+
+    monkeypatch.setattr(mock_invoker.services.images, "get_path", get_path)
+
+    with pytest.raises(FileNotFoundError):
+        service.handler(names, None, None)
+
+    events = mock_invoker.services.events.events
+    assert isinstance(events[0], BulkDownloadStartedEvent)
+    assert isinstance(events[-1], BulkDownloadErrorEvent)
+    assert not any(isinstance(event, BulkDownloadCompleteEvent) for event in events)
+    with pytest.raises(BulkDownloadTargetException):
+        service.get_path("test.zip")
+    assert list((tmp_path / "bulk_downloads").iterdir()) == []
+
+
 def test_generate_id(monkeypatch: Any):
     """Test that the generate_id method generates a unique id."""
 
