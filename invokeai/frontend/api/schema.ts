@@ -37404,6 +37404,11 @@ export type components = {
              */
             cover_image: string | null;
             /**
+             * Roles
+             * @description Other model types this model serves as, besides `type`. Derived from its files at identification; re-identify to refresh.
+             */
+            roles: components["schemas"]["ModelRole"][];
+            /**
              * Type
              * @default main
              * @constant
