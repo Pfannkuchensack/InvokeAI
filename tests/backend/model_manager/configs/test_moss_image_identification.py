@@ -26,7 +26,7 @@ from invokeai.backend.model_manager.configs.main import (
 from invokeai.backend.model_manager.configs.vae import VAE_Checkpoint_Flux2_Config
 from invokeai.backend.model_manager.taxonomy import BaseModelType, ModelFormat
 from invokeai.backend.quantization.gguf.ggml_tensor import GGMLTensor
-from tests.backend.model_manager.load.moss_image_fixtures import fuse_qkv_keys, int8_convrot_keys
+from tests.backend.model_manager.load.moss_image_fixtures import CONVROT_MARKER, fuse_qkv_keys, int8_convrot_keys
 from tests.backend.model_manager.load.state_dicts import moss_image_dit_keys, moss_image_vae_keys
 from tests.backend.model_manager.load.state_dicts.utils import write_header_only_safetensors
 from tests.fixtures.quantized_payloads import q8_cr_marker, quantize_convrot, write_gguf
@@ -227,6 +227,11 @@ def test_unsloths_torchao_fp8_build_installs_with_fp8_storage_on(tmp_path: Path)
             id="comfy-scaled-fp8",
         ),
         pytest.param(
+            lambda keys: (_torchao_fp8(keys), keys.update({"layers.0.proj.k.weight_scale": ([3072], "F32")})),
+            "side channel on a weight that is not int8",
+            id="torchao-with-stray-scale",
+        ),
+        pytest.param(
             lambda keys: keys.update({"layers.0.proj.q.comfy_quant": ([32], "U8")}),
             "side channel on a weight that is not int8",
             id="comfy-quant-marker",
@@ -282,6 +287,26 @@ def test_an_unsupported_quantized_transformer_is_refused_not_registered(
     refusal = result.details[Main_Checkpoint_MossImage_Config.__name__]
     assert isinstance(refusal, InvalidMatchError)
     assert message in str(refusal)
+
+
+def test_a_file_mixing_torchao_fp8_and_int8_convrot_layers_is_refused_at_install(tmp_path: Path) -> None:
+    """The loader takes the int8 path or the fp8 path, so the other half of such a file could never be applied."""
+    keys = _dit()
+    _torchao_fp8(keys)
+    keys["text_embedder.blocks.0.qkv.weight"] = ([192, 4096], "I8")
+    keys["text_embedder.blocks.0.qkv.weight_scale"] = ([192, 1], "F32")
+
+    result = ModelConfigFactory.from_model_on_disk(
+        write_header_only_safetensors(
+            tmp_path / "moss-mixed.safetensors", keys, {"text_embedder.blocks.0.qkv": dict(CONVROT_MARKER)}
+        ),
+        allow_unknown=True,
+    )
+
+    assert result.config is None
+    refusal = result.details[Main_Checkpoint_MossImage_Config.__name__]
+    assert isinstance(refusal, InvalidMatchError)
+    assert "mixes torchao fp8 layers with ComfyUI-quantized" in str(refusal)
 
 
 def test_a_w4a8_build_is_refused_naming_what_does_load(tmp_path: Path) -> None:

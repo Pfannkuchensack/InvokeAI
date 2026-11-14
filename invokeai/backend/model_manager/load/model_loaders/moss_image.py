@@ -46,11 +46,13 @@ from invokeai.backend.model_manager.taxonomy import AnyModel, BaseModelType, Mod
 from invokeai.backend.moss_image.checkpoint_layout import drop_comfy_attention_config, split_fused_qkv
 from invokeai.backend.moss_image.pipeline_moss_image import MOSSImageTransformer
 from invokeai.backend.quantization.fp8_scaled import (
+    TORCHAO_QDATA_SUFFIX,
     attach_fp8_scales,
     cast_state_dict,
     clone_unreplaced_tensors,
     dequantize_fp8_scaled,
     extract_fp8_scaled_layers,
+    is_scale_metadata_key,
     reject_quantized_side_channel,
     split_fp8_scaled_layers,
     translate_torchao_fp8_layers,
@@ -171,6 +173,25 @@ def _read_component_state_dict(directory: Path) -> dict[str, torch.Tensor]:
     return sd
 
 
+def _reject_other_quantization_beside_torchao(sd: Mapping[str, Any], what: str) -> None:
+    """Refuse a torchao fp8 file that also carries any scale or `.comfy_quant` key.
+
+    torchao's own `._weight_scale` is not one of them. The loader applies one quantization per file, as the installer
+    enforces. Some of these files would load wrongly: a stray `X.weight_scale` beside a torchao pair is overwritten by
+    the translation, and int8 markers leave the translated scales behind. A ComfyUI scaled-fp8 layer would load
+    correctly, and is refused only to keep to one quantization. Runs before anything is reserved, for a record that
+    predates the installer's refusal.
+    """
+    if not any(isinstance(key, str) and key.endswith(TORCHAO_QDATA_SUFFIX) for key in sd):
+        return
+    other = sorted(key for key in sd if is_scale_metadata_key(key))
+    if other:
+        raise ValueError(
+            f"{what} mixes torchao fp8 layers with other quantization keys ({len(other)}, e.g. {other[:3]}), and only "
+            "one quantization per file loads. Use another build of this model."
+        )
+
+
 class _MossImageTransformerLoading(ModelLoader):
     """The transformer load both MOSS-Image formats share, once each has a state dict and a geometry."""
 
@@ -246,7 +267,8 @@ class _MossImageTransformerLoading(ModelLoader):
             cast_state_dict(sd, dtype, keep_fp8=keep_fp8, model=model, skip_patterns=skip_patterns)
             if mapped is not None:
                 # Dense tensors the fold and cast left as they were are slices of the file mapping and would pin it,
-                # uncounted. Only on this path: kept fp8 codes stay mapped, as copying them would defeat the keep.
+                # uncounted. The kept path skips this step altogether: copying its fp8 codes costs ~4.4 GB at load, and
+                # the mapping plus the copies are alive together for a moment.
                 clone_unreplaced_tensors(sd, mapped)
                 mapped.clear()
         model.load_state_dict(sd, strict=True, assign=True)
@@ -260,7 +282,15 @@ class _MossImageTransformerLoading(ModelLoader):
                 f"{what}: kept {attached} layer(s) in fp8 (torchao fp8 checkpoint, kept for {self._fp8_kept_reason()})"
             )
             warn_on_unattached_scales(self._logger, "MOSS-Image", attached, fp8_layers)
-            # Already fp8: the layerwise cast would undo the scales, so it must not run.
+            # The remainder stays dense on purpose: the build ships those layers in bf16, and re-encoding them as
+            # unscaled fp8 zeroes most of `time_embedding.2` and changed the image in a 4090 A/B. FP8 Storage on an
+            # fp8 file keeps the file's fp8 layers packed, nothing more (as Qwen-Image-2.1 and FLUX.3 do).
+            #
+            # Memory: the clone step above is skipped on this path. The kept codes and their scales, and every dense
+            # tensor already at the compute dtype, are views of the file mapping. On a bf16 device the folded `.proj.q`
+            # codes (~396 MB) leave `sd` but stay mapped and uncounted, because those views pin the mapping; on fp16
+            # the dense remainder is cast to new tensors and its bf16 bytes stay pinned and uncounted too. On Windows
+            # that is committed memory while the model is cached.
             return model.eval()
         return self._apply_fp8_layerwise_casting(model.eval(), config, SubModelType.Transformer)
 
@@ -343,6 +373,7 @@ class MossImageCheckpointModel(_MossImageTransformerLoading):
         sd = CheckpointPrefix.detect(sd).strip(sd)
         # unsloth's torchao fp8 build, renamed to the scaled-fp8 form. Before the split and the geometry read, which
         # look for `.weight`.
+        _reject_other_quantization_beside_torchao(sd, f"MOSS-Image checkpoint {model_path.name}")
         torchao_fp8 = translate_torchao_fp8_layers(sd) > 0
         sd = split_fused_qkv(sd)
         return self._load_transformer(

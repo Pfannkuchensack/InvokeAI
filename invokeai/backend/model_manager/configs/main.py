@@ -4722,13 +4722,21 @@ def _raise_for_unsupported_moss_image_quantization(mod: ModelOnDisk, state_dict:
     `int8_tensorwise` layers and torchao fp8 layers, nothing else. The shared helper names torchao layouts the loader
     cannot translate (INT8 builds, per-tensor or block-wise scales), nvfp4 and int8 weights whose marker
     is missing or of another scheme (W4A8 stores I8 weights with a codebook); the checks here cover what it does not:
-    packed `uint8` and fp8 weights, and a scale or marker on a weight that is not int8.
+    packed `uint8` and fp8 weights, a scale or marker on a weight that is not int8, and torchao fp8 layers beside
+    ComfyUI-quantized (`.comfy_quant`) ones in one file.
     """
     _raise_for_unsupported_comfy_quantization(
         mod, state_dict, "MOSS-Image", supported=_MOSS_IMAGE_SUPPORTED, accepts_torchao_fp8=True
     )
 
     keys = [key for key in state_dict if isinstance(key, str)]
+    # One quantization per file, as the loader enforces with `_reject_other_quantization_beside_torchao`, its
+    # twin on the loader side.
+    if any(key.endswith(TORCHAO_QDATA_SUFFIX) for key in keys) and any(key.endswith(".comfy_quant") for key in keys):
+        raise InvalidMatchError(
+            "this MOSS-Image transformer mixes torchao fp8 layers with ComfyUI-quantized (`.comfy_quant`) layers, "
+            f"and only one quantization per file loads. {_MOSS_IMAGE_SUPPORTED}"
+        )
     for key in keys:
         dtype = getattr(state_dict[key], "dtype", None)
         if key.endswith(".weight") and dtype is torch.uint8:

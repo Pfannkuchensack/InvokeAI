@@ -13,8 +13,9 @@ import torch
 from invokeai.backend.moss_image.pipeline_moss_image import MOSSImageTransformer
 from invokeai.backend.quantization.dequantizing_linear import peak_dequant_transient_bytes
 from invokeai.backend.util.attention import sdpa_score_matrix_bytes
+from invokeai.backend.util.fp8 import peak_fp8_cast_transient_bytes
 from invokeai.backend.working_memory.estimate import FeatureValue, WorkingMemoryEstimate, WorkingMemoryTerm
-from invokeai.backend.working_memory.fit import Line
+from invokeai.backend.working_memory.fit import Line, off_line_reasons
 from invokeai.backend.working_memory.spec import EstimatorSpec, register
 
 # One transformer token per 2x2 patch of the FLUX.2 VAE's 8x latent.
@@ -37,9 +38,9 @@ def _line(features: Mapping[str, FeatureValue]) -> Optional[Line]:
     fit leaves it out (`fit.hand_set_values`): the slope is hand-set until a fitted base ships with it."""
     if not all(isinstance(features.get(name), int) for name in ("height", "width", "text_tokens")):
         return None
-    on_top = [f"{name}={features[name]}" for name in ("score_matrix_bytes", "dequant_bytes") if features.get(name)]
+    off_line = off_line_reasons(_denoise_terms, features, ("k_token",))
     shape = f"{features['height']}x{features['width']}-text{features['text_tokens']}"
-    return Line("token", _tokens(features), not on_top, "-".join((shape, *on_top)))
+    return Line("token", _tokens(features), not off_line, "-".join((shape, *off_line)))
 
 
 def _denoise_terms(features: Mapping[str, FeatureValue], values: Mapping[str, float]) -> tuple[WorkingMemoryTerm, ...]:
@@ -50,6 +51,9 @@ def _denoise_terms(features: Mapping[str, FeatureValue], values: Mapping[str, fl
         WorkingMemoryTerm("attention_scores", cast(int, features["score_matrix_bytes"]), True),
         # Analytic: the dequantized copy of the largest packed Linear of a quantized build, zero for a dense one.
         WorkingMemoryTerm("dequant_transient", cast(int, features["dequant_bytes"]), True),
+        # Analytic: the compute-dtype copies of the largest float8-stored layer that FP8 Storage widens per forward, or
+        # that a kept fp8 checkpoint dequantizes with its scale (two copies); zero for a build with no float8 weight.
+        WorkingMemoryTerm("fp8_cast_transient", cast(int, features["fp8_cast_bytes"]), True),
     )
 
 
@@ -96,5 +100,6 @@ def estimate_moss_image_denoise_working_memory(
             seq_len=image_tokens + text_tokens,
         ),
         "dequant_bytes": peak_dequant_transient_bytes(transformer, dtype),
+        "fp8_cast_bytes": peak_fp8_cast_transient_bytes(transformer, dtype),
     }
     return MOSS_IMAGE_DENOISE_SPEC.estimate(features, device)
