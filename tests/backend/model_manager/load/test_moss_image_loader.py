@@ -18,12 +18,14 @@ import pytest
 import torch
 from safetensors.torch import save_file
 
+from invokeai.backend.model_manager.configs.default_settings import MainModelDefaultSettings
 from invokeai.backend.model_manager.configs.main import (
     Main_Checkpoint_MossImage_Config,
     Main_Diffusers_MossImage_Config,
     Main_GGUF_MossImage_Config,
 )
 from invokeai.backend.model_manager.configs.vae import VAE_Checkpoint_Flux2_Config
+from invokeai.backend.model_manager.load import load_default
 from invokeai.backend.model_manager.load.model_cache.torch_module_autocast.torch_module_autocast import (
     apply_custom_layers_to_model,
 )
@@ -463,10 +465,16 @@ class TestFusedAndInt8Checkpoints:
 
     def _load(self, monkeypatch: pytest.MonkeyPatch, path: Path, *, fp8_storage: bool = False) -> tuple[Any, Any]:
         loader = _loader(MossImageCheckpointModel, monkeypatch)
-        if fp8_storage:
-            loader._should_use_fp8 = lambda _config, _submodel=None: True
-        config = Main_Checkpoint_MossImage_Config.model_construct(path=str(path), name="moss")
+        config = self._config(path, fp8_storage=fp8_storage)
         return loader._load_model(config, SubModelType.Transformer), loader
+
+    @staticmethod
+    def _config(path: Path, *, fp8_storage: bool = False) -> Main_Checkpoint_MossImage_Config:
+        return Main_Checkpoint_MossImage_Config.model_construct(
+            path=str(path),
+            name="moss",
+            default_settings=MainModelDefaultSettings(fp8_storage=True) if fp8_storage else None,
+        )
 
     @pytest.mark.parametrize("prefix", ["", "model.diffusion_model."])
     def test_a_fused_bf16_file_loads_as_the_split_model(
@@ -521,21 +529,30 @@ class TestFusedAndInt8Checkpoints:
         ):
             self._load(monkeypatch, path)
 
-    def test_fp8_storage_leaves_the_int8_layers_alone_and_still_runs(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    def test_fp8_storage_leaves_an_int8_build_as_the_build_stores_it(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
     ) -> None:
-        stored, meant = int8_convrot_state_dict(tiny_reference())
+        stored, _ = int8_convrot_state_dict(tiny_reference())
         path = tmp_path / "moss_image_base_int8_convrot.safetensors"
         save_file(stored, str(path))
+        # Only the device probe is doubled: the request, the model kind and the format go through the real gate.
+        monkeypatch.setattr(load_default, "_device_supports_fp8_storage", lambda *_args, **_kwargs: True)
 
-        model, _ = self._load(monkeypatch, path, fp8_storage=True)
+        with caplog.at_level(logging.INFO, logger=__name__):
+            plain, _ = self._load(monkeypatch, path)
+            model, loader = self._load(monkeypatch, path, fp8_storage=True)
 
-        assert all(isinstance(model.layers[0].proj[name], Int8ConvrotLinear) for name in ("k", "v", "o", "ffn_down"))
-        assert model.layers[0].proj["q"].weight.dtype is torch.float32
-        # The dense Linears nothing reads the dtype of are the ones that took the cast.
-        assert model.text_embedder.blocks[0].qkv.weight.dtype is torch.float8_e4m3fn
-        expected = forward(with_state_dict(meant))
-        assert (forward(model) - expected).norm() / expected.norm() < 0.1
+        assert loader._should_use_fp8(self._config(path, fp8_storage=True), SubModelType.Transformer)
+        assert [
+            n for n, t in [*model.named_parameters(), *model.named_buffers()] if t.dtype is torch.float8_e4m3fn
+        ] == []
+        plain_state = plain.state_dict()
+        assert model.state_dict().keys() == plain_state.keys()
+        for name, tensor in model.state_dict().items():
+            assert torch.equal(tensor, plain_state[name]), name
+        # Once, for the load that asked: not for the plain one, and not twice.
+        assert caplog.text.count("FP8 Storage skipped - ") == 1
+        assert torch.equal(forward(model), forward(plain))
 
 
 class TestGGUFLoader:

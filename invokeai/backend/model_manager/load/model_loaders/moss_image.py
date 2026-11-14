@@ -181,6 +181,7 @@ class _MossImageTransformerLoading(ModelLoader):
         sd.setdefault("rope.bands", model.rope.bands)
 
         skip_patterns = _model_declared_skip_patterns(model)
+        kept: dict[str, dict[str, Any]] = {}
         if markers:
             # In place: a rebound dict would keep the originals alive and overshoot the reservation.
             kept_sd = drop_unconsumed_quantization_sidecars(sd)
@@ -219,6 +220,16 @@ class _MossImageTransformerLoading(ModelLoader):
         # through the cast below.
         sd.clear()
         reject_incomplete_load(model, what=what)
+        if kept:
+            # What FP8 Storage could still cast in an int8 build is the dense remainder (the text refiner and
+            # `time_embedding.2`), which the build left in bf16 on purpose: the cast is unscaled e4m3, and
+            # `time_embedding.2.weight` (median |w| 2.6e-4) flushes 95 % of its weights to zero. Skipped, as for FLUX.1-3.
+            if self._fp8_storage_asked_for(config, SubModelType.Transformer):
+                self._logger.info(
+                    f"{what}: FP8 Storage skipped - this int8 build keeps its int8 layers as stored and its other "
+                    "layers in the precision the build chose."
+                )
+            return model.eval()
         return self._apply_fp8_layerwise_casting(model.eval(), config, SubModelType.Transformer)
 
 
