@@ -26,7 +26,7 @@ from invokeai.app.services.session_queue.session_queue_default import SessionQue
 from invokeai.app.services.shared.database.database import Database
 from invokeai.app.services.shared.graph import Graph, GraphExecutionState
 from invokeai.app.services.shared.invocation_context import InvocationContext
-from invokeai.backend.util.devices import TorchDevice
+from invokeai.backend.util.devices import EmptyCacheOutcome, TorchDevice
 
 # Bounds a hang, not worker latency.
 _TIMEOUT = 30
@@ -55,12 +55,11 @@ class _DeviceRequests:
         monkeypatch.setattr(TorchDevice, "flush_deferred_empty_cache", self._record("flush"))
 
     def _record(self, name: str):
-        def stub(cls, force: bool = False) -> bool:
+        def stub(cls, force: bool = False) -> None:
             self.calls.append((name, force))
             if self.sample is not None:
                 self.samples.append(self.sample())
             self._released.set()
-            return True
 
         return classmethod(stub)
 
@@ -145,7 +144,7 @@ def test_clear_vram_after_session_moves_every_model_to_ram_and_forces_the_releas
 
 
 def test_clear_vram_after_session_logs_a_refused_forced_release_instead_of_failing_the_worker(monkeypatch) -> None:
-    def refuse(cls, force: bool = False) -> bool:
+    def refuse(cls, force: bool = False) -> EmptyCacheOutcome:
         raise RuntimeError("HIP error: invalid device context")
 
     monkeypatch.setattr(TorchDevice, "empty_cache", classmethod(refuse))
@@ -159,7 +158,7 @@ def test_clear_vram_after_session_logs_a_refused_forced_release_instead_of_faili
 
 def test_clear_vram_after_session_leaves_other_gpus_caches_alone(monkeypatch) -> None:
     """Multi-GPU: a worker clears its own device's cache only -- a peer may be mid-session on its own."""
-    monkeypatch.setattr(TorchDevice, "empty_cache", classmethod(lambda cls, force=False: True))
+    monkeypatch.setattr(TorchDevice, "empty_cache", classmethod(lambda cls, force=False: EmptyCacheOutcome.RAN))
     caches = {"cuda:0": _Cache(), "cuda:1": _Cache()}
     for device, cache in caches.items():
         cache.execution_device = torch.device(device)  # type: ignore[attr-defined]

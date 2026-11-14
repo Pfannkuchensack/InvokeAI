@@ -12,6 +12,7 @@ import torch
 
 from invokeai.app.services.config import get_config
 from invokeai.backend.util.devices import (
+    EmptyCacheOutcome,
     TorchDevice,
     choose_precision,
     choose_torch_device,
@@ -1107,9 +1108,9 @@ def test_a_forced_empty_cache_runs_past_a_busy_peer_and_its_wrapper(monkeypatch)
     monkeypatch.setattr(torch.backends.mps, "is_available", lambda: False)
     monkeypatch.setattr(TorchDevice, "_another_generation_device_busy", classmethod(lambda cls: True))
 
-    assert TorchDevice.empty_cache() is False
+    assert TorchDevice.empty_cache() is EmptyCacheOutcome.DEFERRED
     assert calls == []
-    assert TorchDevice.empty_cache(force=True) is True
+    assert TorchDevice.empty_cache(force=True) is EmptyCacheOutcome.RAN
     assert calls == ["torch"]
 
 
@@ -1198,12 +1199,13 @@ def refusing_backend(monkeypatch):
     return backend
 
 
-def test_empty_cache_the_backend_refuses_is_reported_as_not_run(refusing_backend, caplog):
+def test_empty_cache_the_backend_refuses_is_reported_as_refused(refusing_backend, caplog):
     """An ordinary release is advisory: a device context that cannot return its cached blocks (or runs out of
     memory doing so) must not fail the eviction, offload or Empty Cache request that asked for it."""
     with caplog.at_level("WARNING"):
-        assert TorchDevice.empty_cache() is False
+        outcome = TorchDevice.empty_cache()
 
+    assert outcome is EmptyCacheOutcome.REFUSED
     assert refusing_backend.calls == 1
     assert refusing_backend.observer.calls == ["before", "after"]
     assert not TorchDevice._empty_cache_deferred.is_set()

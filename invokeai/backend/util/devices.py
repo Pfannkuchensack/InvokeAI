@@ -1,6 +1,7 @@
 import sys
 import threading
 from collections import Counter, defaultdict
+from enum import Enum
 from functools import wraps
 from typing import Dict, Literal, Optional, Protocol, Union
 
@@ -24,6 +25,14 @@ MPS_DEVICE = torch.device("mps")
 # Devices for which the blind free-VRAM estimate has already been reported, so the
 # warning is emitted once per device rather than on every cache query.
 _XPU_MEM_FALLBACK_WARNED: set[str] = set()
+
+
+class EmptyCacheOutcome(Enum):
+    """What `TorchDevice.empty_cache` did. Callers compare members explicitly; only RAN returned memory to the driver."""
+
+    RAN = "ran"
+    DEFERRED = "deferred"  # another generation device is mid-session; flush_deferred_empty_cache() runs it later
+    REFUSED = "refused"  # the backend raised; logged as a warning, the blocks stay reserved
 
 
 class EmptyCacheObserver(Protocol):
@@ -441,8 +450,9 @@ class TorchDevice:
             torch.mps.synchronize()
 
     @classmethod
-    def empty_cache(cls, force: bool = False) -> bool:
-        """Clear the GPU device cache — unless another generation device is mid-session. Says whether it ran.
+    def empty_cache(cls, force: bool = False) -> EmptyCacheOutcome:
+        """Clear the GPU device cache — unless another generation device is mid-session.
+        Returns RAN, DEFERRED (skipped for a busy peer) or REFUSED (the backend raised).
 
         `force` runs it regardless, for callers whose alternative is worse than stalling a busy peer for the rest of
         its current step: a model about to run without the driver-free working memory it needs, which on Windows
@@ -476,7 +486,7 @@ class TorchDevice:
         whole render finished and something else happened to call empty_cache.
 
         A release the backend refuses (a `RuntimeError` such as `torch.AcceleratorError` or `OutOfMemoryError` from a
-        broken or exhausted device context) is, for an ordinary call, logged as a warning and reported as not run,
+        broken or exhausted device context) is, for an ordinary call, logged as a warning and reported as REFUSED,
         never raised: the release is advisory, torch keeps reusing the blocks it could not return, and the operation
         that asked for it (an eviction, an offload, the Empty Cache request, the release after a session) must still
         complete. A context that stays broken fails the next real operation on its own. A `force` call raises the
@@ -489,7 +499,7 @@ class TorchDevice:
             InvokeAILogger.get_logger(cls.__name__).debug(
                 "Deferring empty_cache: another generation device is mid-session."
             )
-            return False
+            return EmptyCacheOutcome.DEFERRED
         # Clear before running: a skip that races in after this point re-sets the flag, so a
         # request is never lost, only (harmlessly) repeated.
         cls._empty_cache_deferred.clear()
@@ -514,11 +524,11 @@ class TorchDevice:
                 "The memory stays reserved by this process; restart Invoke if generations keep failing with GPU "
                 "errors."
             )
-            return False
+            return EmptyCacheOutcome.REFUSED
         finally:
             for observer in observers:
                 observer.after_empty_cache()
-        return True
+        return EmptyCacheOutcome.RAN
 
     @classmethod
     def flush_deferred_empty_cache(cls) -> None:

@@ -282,8 +282,10 @@ def test_empty_model_cache_aggregates_per_device_results(monkeypatch: Any, clien
     from invokeai.backend.model_manager.load.model_cache.model_cache import CacheClearResult
 
     class _Cache:
-        def __init__(self, models_cleared: int, bytes_freed: int) -> None:
-            self._result = CacheClearResult(models_cleared=models_cleared, bytes_freed=bytes_freed)
+        def __init__(self, models_cleared: int, bytes_freed: int, vram_release_refused: bool = False) -> None:
+            self._result = CacheClearResult(
+                models_cleared=models_cleared, bytes_freed=bytes_freed, vram_release_refused=vram_release_refused
+            )
             self.requested: list[int] = []
 
         def make_room(self, bytes_needed: int) -> CacheClearResult:
@@ -291,7 +293,7 @@ def test_empty_model_cache_aggregates_per_device_results(monkeypatch: Any, clien
             return self._result
 
     cache_0 = _Cache(models_cleared=2, bytes_freed=100)
-    cache_1 = _Cache(models_cleared=3, bytes_freed=250)
+    cache_1 = _Cache(models_cleared=3, bytes_freed=250, vram_release_refused=True)
     services = _make_stats_services({"cuda:0": cache_0, "cuda:1": cache_1})
     invoker = DummyInvoker(services)
     monkeypatch.setattr("invokeai.app.api.routers.model_manager.ApiDependencies", MockApiDependencies(invoker))
@@ -300,7 +302,7 @@ def test_empty_model_cache_aggregates_per_device_results(monkeypatch: Any, clien
     response = client.post("/api/v2/models/empty_model_cache")
 
     assert response.status_code == 200
-    assert response.json() == {"models_cleared": 5, "bytes_freed": 350}
+    assert response.json() == {"models_cleared": 5, "bytes_freed": 350, "vram_release_refused": True}
     # Both devices were actually asked to clear, not just the API thread's default cache.
     assert len(cache_0.requested) == 1
     assert len(cache_1.requested) == 1
@@ -317,7 +319,7 @@ def test_empty_model_cache_clears_duplicate_cache_objects_once(monkeypatch: Any,
 
         def make_room(self, bytes_needed: int) -> CacheClearResult:
             self.calls += 1
-            return CacheClearResult(models_cleared=2, bytes_freed=100)
+            return CacheClearResult(models_cleared=2, bytes_freed=100, vram_release_refused=False)
 
     shared = _Cache()
     services = _make_stats_services({"cuda:0": shared, "cpu": shared})
@@ -328,7 +330,7 @@ def test_empty_model_cache_clears_duplicate_cache_objects_once(monkeypatch: Any,
     response = client.post("/api/v2/models/empty_model_cache")
 
     assert response.status_code == 200
-    assert response.json() == {"models_cleared": 2, "bytes_freed": 100}
+    assert response.json() == {"models_cleared": 2, "bytes_freed": 100, "vram_release_refused": False}
     assert shared.calls == 1
 
 
@@ -372,9 +374,49 @@ def test_empty_model_cache_succeeds_when_the_device_refuses_to_release_its_cache
     response = client.post("/api/v2/models/empty_model_cache")
 
     assert response.status_code == 200
-    assert response.json() == {"models_cleared": 1, "bytes_freed": size}
+    assert response.json() == {"models_cleared": 1, "bytes_freed": size, "vram_release_refused": True}
     assert "model" not in cache._cached_models
     assert releases == ["refused"]
+
+
+def test_empty_model_cache_does_not_report_a_deferred_release_as_refused(monkeypatch: Any, client: TestClient) -> None:
+    """A release skipped because another generation device is mid-session runs later; it is not a refusal, so the
+    client must not warn about unreleased GPU memory."""
+    import torch
+
+    from invokeai.backend.model_manager.load.model_cache.model_cache import ModelCache
+    from invokeai.backend.util import devices
+    from invokeai.backend.util.devices import TorchDevice
+    from tests.backend.model_manager.load.model_cache.cached_model.utils import DummyModule
+
+    releases = []
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    monkeypatch.setattr(torch.cuda, "empty_cache", lambda: releases.append("released"))
+    monkeypatch.setattr(torch.backends.mps, "is_available", lambda: False)
+    monkeypatch.setattr(devices, "_xpu_is_available", lambda: False)
+    monkeypatch.setattr(TorchDevice, "_another_generation_device_busy", classmethod(lambda cls: True))
+
+    cache = ModelCache(
+        execution_device_working_mem_gb=1.0,
+        enable_partial_loading=False,
+        keep_ram_copy_of_weights=True,
+        execution_device="cpu",
+        storage_device="cpu",
+        logger=logging.getLogger("test.model_manager_router"),
+    )
+    cache.put("model", DummyModule())
+    size = cache.get("model").cached_model.total_bytes()
+    invoker = DummyInvoker(_make_stats_services({"cpu": cache}))
+    monkeypatch.setattr("invokeai.app.api.routers.model_manager.ApiDependencies", MockApiDependencies(invoker))
+    monkeypatch.setattr("invokeai.app.api.auth_dependencies.ApiDependencies", MockApiDependencies(invoker))
+
+    response = client.post("/api/v2/models/empty_model_cache")
+
+    assert response.status_code == 200
+    assert response.json() == {"models_cleared": 1, "bytes_freed": size, "vram_release_refused": False}
+    assert "model" not in cache._cached_models
+    assert releases == []
 
 
 def test_get_stats_returns_null_when_no_stats(monkeypatch: Any, client: TestClient) -> None:

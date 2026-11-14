@@ -34,7 +34,7 @@ from invokeai.backend.model_manager.load.model_cache.torch_module_autocast.torch
 )
 from invokeai.backend.model_manager.load.model_util import calc_model_size_by_data
 from invokeai.backend.model_manager.taxonomy import AnyModel, SubModelType
-from invokeai.backend.util.devices import TorchDevice, device_has_dedicated_vram
+from invokeai.backend.util.devices import EmptyCacheOutcome, TorchDevice, device_has_dedicated_vram
 from invokeai.backend.util.level_zero import xpu_device_is_integrated
 from invokeai.backend.util.logging import InvokeAILogger
 from invokeai.backend.util.prefix_logger_adapter import PrefixedLoggerAdapter
@@ -461,6 +461,7 @@ class CacheEntrySnapshot:
 class CacheClearResult:
     models_cleared: int
     bytes_freed: int
+    vram_release_refused: bool  # the device refused to return its cached blocks after the drop
 
 
 class CacheMissCallback(Protocol):
@@ -2266,7 +2267,7 @@ class ModelCache:
             releasable = self._get_reclaimable_allocator_bytes()
         if releasable < _MIN_RELEASABLE_FOR_RESERVE:
             return
-        if TorchDevice.empty_cache(force=sys.platform == "win32"):
+        if TorchDevice.empty_cache(force=sys.platform == "win32") is EmptyCacheOutcome.RAN:
             self._logger.debug(
                 f"Returned {releasable / MB:.0f}MB of the allocator's unused blocks to the driver: "
                 f"{driver_free / MB:.0f}MB driver-free was short of the {reserve / MB:.0f}MB working-memory reserve."
@@ -2667,7 +2668,7 @@ class ModelCache:
                     f"Unloaded {cache_entry.key} from VRAM to free {(cache_entry_bytes_freed / MB):.0f} MB."
                 )
                 if empty_cache_per_offload:
-                    if TorchDevice.empty_cache():
+                    if TorchDevice.empty_cache() is EmptyCacheOutcome.RAN:
                         vram_bytes_freed_uncounted = 0
                     else:
                         vram_bytes_freed_uncounted += cache_entry_bytes_freed
@@ -2867,11 +2868,12 @@ class ModelCache:
         # box: a no-op make_room during one worker's model load froze the other worker's denoise
         # step for its full duration). make_room runs on every put(), and most of those evict
         # nothing, so the unconditional call turned every submodel load into a cross-GPU stall.
-        if models_cleared > 0:
-            TorchDevice.empty_cache()
+        vram_release_refused = models_cleared > 0 and TorchDevice.empty_cache() is EmptyCacheOutcome.REFUSED
         self._logger.debug(f"Dropped {models_cleared} models to free {ram_bytes_freed / MB:.2f}MB of RAM.")
         self._log_cache_state(title="After dropping models:")
-        return CacheClearResult(models_cleared=models_cleared, bytes_freed=ram_bytes_freed)
+        return CacheClearResult(
+            models_cleared=models_cleared, bytes_freed=ram_bytes_freed, vram_release_refused=vram_release_refused
+        )
 
     def evict_unlocked_for_peer(self, is_satisfied: Callable[[], bool]) -> Optional[int]:
         """Evict this cache's unlocked entries on behalf of another device's cache (best effort).
