@@ -16,6 +16,9 @@ from invokeai.backend.patches.lora_conversions.moss_image_lora_constants import 
 )
 from invokeai.backend.patches.lora_conversions.peft_adapter_utils import peft_scale
 from invokeai.backend.patches.model_patch_raw import ModelPatchRaw
+from invokeai.backend.util.logging import InvokeAILogger
+
+logger = InvokeAILogger.get_logger(__name__)
 
 Values = dict[str, torch.Tensor]
 
@@ -72,7 +75,12 @@ def _complete_leftovers(fused: str, values_by_module: dict[str, Values], leftove
     """Resolve the two incomplete entries ai-toolkit writes beside a fused `proj.qkv` (`MossImageLoRAKeys.leftovers`).
 
     A lone `dora_scale` there is the output-axis magnitude of the DoRA layers its split LoRA make: each takes its third.
-    The lone `alpha` of `proj.q`/`k`/`v` is what ai-toolkit copies to every module of one LoKr, so the LoKr takes it.
+    The lone `alpha` of `proj.q`/`k`/`v` is the LoKr's own: ai-toolkit saves one `proj.qkv.alpha` cloned onto q, k and
+    v (its `convert_lora_weights_before_save` lists `alpha` among the shared keys) and keeps the LoKr keys fused.
+    The LoKr takes it, which is the scale it trained with: ai-toolkit scales a LoKr by alpha / rank where an operand
+    is factored, and by 1 where both are whole. ComfyUI never reads these alphas for the fused LoKr and applies 1.
+    Alphas that differ do not come from ai-toolkit, and identification, which sees shapes only, cannot compare
+    them: the first, in q, k, v order, is taken and the conversion warns.
     """
     modules = split_qkv_modules(fused)
     if fused in leftovers:
@@ -82,7 +90,10 @@ def _complete_leftovers(fused: str, values_by_module: dict[str, Values], leftove
     alphas = [leftovers[module]["alpha"] for module in modules if module in leftovers]
     if alphas:
         if any(not torch.equal(alpha, alphas[0]) for alpha in alphas):
-            raise ValueError(f"The lone alphas beside {fused} differ, so the scale of its LoKr is ambiguous.")
+            logger.warning(
+                f"The lone alphas beside {fused} differ ({[alpha.item() for alpha in alphas]}); its LoKr takes the "
+                f"first, {alphas[0].item()}."
+            )
         values_by_module[fused]["alpha"] = alphas[0]
 
 

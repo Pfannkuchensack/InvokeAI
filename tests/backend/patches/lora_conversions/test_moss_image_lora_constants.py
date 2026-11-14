@@ -192,3 +192,13 @@ def test_a_raw_peft_lora_is_recognized_and_refused_for_its_missing_alpha(prefix:
 
     assert constants.has_moss_image_lora_keys(state_dict)
     assert set(constants.unsupported_keys(state_dict).values()) == {constants.RAW_PEFT}
+
+
+def test_bundled_embeddings_are_skipped_as_the_loader_does() -> None:
+    """Some trainers bundle textual-inversion embeddings into a LoRA; `LoRALoader` drops them, so they are no reason to
+    refuse the file."""
+    state_dict = _header(moss_image_lora_aitoolkit_format.state_dict_keys)
+    state_dict["bundle_emb.emb_params.string_to_param.*"] = torch.empty(4, 4096, device="meta")
+
+    assert constants.has_moss_image_lora_keys(state_dict)
+    assert constants.unsupported_keys(state_dict) == {}

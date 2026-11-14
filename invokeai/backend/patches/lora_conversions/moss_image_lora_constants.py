@@ -245,6 +245,9 @@ def read_moss_image_lora_keys(state_dict: Mapping[str | int, Any]) -> MossImageL
     modules: dict[str, dict[str, list[str]]] = {}
     names: dict[str, set[str]] = {}
     for key in state_dict:
+        if isinstance(key, str) and key.startswith("bundle_emb"):
+            # Textual-inversion embeddings some trainers bundle; the LoRA loader drops them (`LoRALoader._load_model`).
+            continue
         split = _split_param(key) if isinstance(key, str) else None
         if split is None:
             refused[str(key)] = NOT_A_LORA_PARAMETER

@@ -386,17 +386,44 @@ def test_ai_toolkits_lokr_takes_the_alpha_its_split_layers_left_behind(direct: b
     _check_fused(model, patch, expected, direct=direct)
 
 
-def test_alphas_left_behind_that_disagree_do_not_scale_the_lokr() -> None:
+@pytest.mark.parametrize("direct", [True, False], ids=["direct", "sidecar"])
+def test_a_fused_lokr_with_a_factored_operand_takes_the_alpha_of_its_left_behind_ones_as_its_scale(
+    direct: bool,
+) -> None:
+    """ai-toolkit trains a LoKr with a factored operand at alpha / rank (here 16 / 8), and clones its one alpha onto q, k
+    and v of the split layers. ComfyUI would apply 1; the training scale is what the LoRA was made for."""
+    model = tiny_reference()
+    fused = torch.cat([model.layers[0].proj[name].weight.detach() for name in "qkv"])
+    w1, w2a, w2b = _randn(8, 8, seed=60), _randn(24, 8, seed=61), _randn(8, 8, seed=62)
     state_dict = {
-        "diffusion_model.layers.0.proj.qkv.lokr_w1": _randn(8, 8),
-        "diffusion_model.layers.0.proj.qkv.lokr_w2": _randn(24, 8),
-        "diffusion_model.layers.0.proj.q.alpha": torch.tensor(1.0),
+        "diffusion_model.layers.0.proj.qkv.lokr_w1": w1,
+        "diffusion_model.layers.0.proj.qkv.lokr_w2_a": w2a,
+        "diffusion_model.layers.0.proj.qkv.lokr_w2_b": w2b,
+        **{f"diffusion_model.layers.0.proj.{name}.alpha": torch.tensor(16.0) for name in "qkv"},
+    }
+    expected = fused + PATCH_WEIGHT * torch.kron(w1, w2a @ w2b) * (16 / 8)
+
+    _check_fused(model, convert(state_dict), expected, direct=direct)
+
+
+def test_alphas_left_behind_that_disagree_give_the_lokr_the_first_and_warn(caplog: pytest.LogCaptureFixture) -> None:
+    """ai-toolkit clones one alpha, so differing ones are not its doing, and identification cannot compare values."""
+    w1, w2a, w2b = _randn(8, 8, seed=63), _randn(24, 8, seed=64), _randn(8, 8, seed=65)
+    state_dict = {
+        "diffusion_model.layers.0.proj.qkv.lokr_w1": w1,
+        "diffusion_model.layers.0.proj.qkv.lokr_w2_a": w2a,
+        "diffusion_model.layers.0.proj.qkv.lokr_w2_b": w2b,
+        "diffusion_model.layers.0.proj.q.alpha": torch.tensor(16.0),
         "diffusion_model.layers.0.proj.k.alpha": torch.tensor(2.0),
         "diffusion_model.layers.0.proj.v.alpha": torch.tensor(2.0),
     }
 
-    with pytest.raises(ValueError, match="differ"):
-        convert(state_dict)
+    with caplog.at_level(logging.WARNING):
+        patch = convert(state_dict)
+
+    third = patch.layers[f"{PREFIX}layers.0.proj.q"].get_parameters({"weight": torch.zeros(DIM, DIM)}, weight=1.0)
+    torch.testing.assert_close(third["weight"], torch.kron(w1, w2a @ w2b)[:DIM] * (16 / 8))
+    assert any("layers.0.proj.qkv" in r.getMessage() and "[16.0, 2.0, 2.0]" in r.getMessage() for r in caplog.records)
 
 
 @pytest.mark.parametrize(
