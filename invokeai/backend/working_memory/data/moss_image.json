@@ -21,8 +21,7 @@
         "width": 1024,
         "text_tokens": 64,
         "score_matrix_bytes": 0,
-        "dequant_bytes": 0,
-        "fp8_cast_bytes": 0
+        "dequant_bytes": 0
       },
       "measured_bytes": 803209216,
       "method": "device_peak",
@@ -38,8 +37,7 @@
         "width": 1024,
         "text_tokens": 1024,
         "score_matrix_bytes": 0,
-        "dequant_bytes": 0,
-        "fp8_cast_bytes": 0
+        "dequant_bytes": 0
       },
       "measured_bytes": 1029701632,
       "method": "device_peak",
@@ -55,8 +53,7 @@
         "width": 1024,
         "text_tokens": 4096,
         "score_matrix_bytes": 0,
-        "dequant_bytes": 0,
-        "fp8_cast_bytes": 0
+        "dequant_bytes": 0
       },
       "measured_bytes": 1696595968,
       "method": "device_peak",
@@ -72,8 +69,7 @@
         "width": 1536,
         "text_tokens": 256,
         "score_matrix_bytes": 0,
-        "dequant_bytes": 0,
-        "fp8_cast_bytes": 0
+        "dequant_bytes": 0
       },
       "measured_bytes": 1121976320,
       "method": "device_peak",
@@ -89,8 +85,7 @@
         "width": 1536,
         "text_tokens": 256,
         "score_matrix_bytes": 0,
-        "dequant_bytes": 0,
-        "fp8_cast_bytes": 0
+        "dequant_bytes": 0
       },
       "measured_bytes": 1639972864,
       "method": "device_peak",
@@ -106,8 +101,7 @@
         "width": 2048,
         "text_tokens": 256,
         "score_matrix_bytes": 0,
-        "dequant_bytes": 0,
-        "fp8_cast_bytes": 0
+        "dequant_bytes": 0
       },
       "measured_bytes": 2862612480,
       "method": "device_peak",

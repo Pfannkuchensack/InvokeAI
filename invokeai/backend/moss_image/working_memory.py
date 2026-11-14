@@ -53,7 +53,8 @@ def _denoise_terms(features: Mapping[str, FeatureValue], values: Mapping[str, fl
         WorkingMemoryTerm("dequant_transient", cast(int, features["dequant_bytes"]), True),
         # Analytic: the compute-dtype copies of the largest float8-stored layer that FP8 Storage widens per forward, or
         # that a kept fp8 checkpoint dequantizes with its scale (two copies); zero for a build with no float8 weight.
-        WorkingMemoryTerm("fp8_cast_transient", cast(int, features["fp8_cast_bytes"]), True),
+        # Absent from the points measured before it was priced, all of them bf16 forwards without one.
+        WorkingMemoryTerm("fp8_cast_transient", cast(int, features.get("fp8_cast_bytes", 0)), True),
     )
 
 
