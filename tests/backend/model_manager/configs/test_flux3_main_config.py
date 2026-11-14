@@ -367,6 +367,20 @@ def test_int8_markers_beside_torchao_layers_are_refused(tmp_path: Path) -> None:
     assert any("mixes int8 and torchao" in str(error) for error in result.invalid_matches), result.invalid_matches
 
 
+def test_an_nvfp4_layer_beside_torchao_layers_is_refused(tmp_path: Path) -> None:
+    """The nvfp4 re-layout reads Black Forest Labs' names, so in a torchao file, saved under diffusers' names, it
+    would swap the halves of rows already in diffusers' order."""
+    keys = dict(flux3_klein_torchao_fp8_keys.state_dict_keys)
+    layer = "txt_mode_blocks.0.attn.to_q"
+    del keys[f"{layer}.weight"]
+    keys.update({f"{layer}.{name}": entry for name, entry in _NVFP4.items()})
+
+    result = _identify(write_shrunk_safetensors(tmp_path / "flux3.safetensors", keys, metadata=_header_naming(layer)))
+
+    assert result.config is None
+    assert any("mixes torchao and nvfp4" in str(error) for error in result.invalid_matches), result.invalid_matches
+
+
 def test_a_torchao_klein_that_quantizes_its_flow_map_embedder_is_still_klein(tmp_path: Path) -> None:
     keys = dict(flux3_klein_torchao_fp8_keys.state_dict_keys)
     shape, _ = keys.pop("target_timestep_embedder.linear_1.weight")

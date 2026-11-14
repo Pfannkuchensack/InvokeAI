@@ -1,11 +1,11 @@
 """Native FLUX.3 state dicts, converted to diffusers' ``Flux3Transformer2DModel``.
 
-Every single-file FLUX.3 build InvokeAI loads uses Black Forest Labs' own key names -- BFL's
-``model.safetensors`` and its quantized ``variants/``, the ComfyUI repackages, and the GGUF conversions -- except
-unsloth's torchao FP8 build, which is saved under diffusers' names and is not converted (:func:`is_flux3_diffusers_layout`). The
-renames are a port of diffusers' ``convert_flux3_transformer_checkpoint_to_diffusers`` (``single_file_utils.py``
-in diffusers 0.42.1). Reading the structure from the weights, rather than assuming the released one, is
-InvokeAI's: a finetune that changes the depth must not load as the first N blocks of the released model.
+Every single-file FLUX.3 build InvokeAI loads uses Black Forest Labs' own key names -- BFL's ``model.safetensors`` and
+its quantized ``variants/``, the ComfyUI repackages, and the GGUF conversions -- except unsloth's torchao FP8 build,
+which is saved under diffusers' names and is not converted (:func:`is_flux3_diffusers_layout`). The renames are a port
+of diffusers' ``convert_flux3_transformer_checkpoint_to_diffusers`` (``single_file_utils.py`` in diffusers 0.42.1).
+Reading the structure from the weights, rather than assuming the released one, is InvokeAI's: a finetune that changes
+the depth must not load as the first N blocks of the released model.
 
 Comfy-Org's ``int8_convrot`` build fuses each block's query, key and value into one ``qkv`` linear, which
 diffusers keeps apart: it is split here, its quantization side channel with it. Where a native module lands is a

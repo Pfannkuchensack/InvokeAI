@@ -80,7 +80,7 @@ def reject_unloadable_quantization(
     - what :func:`find_nvfp4_layers` refuses: AWQ, nvfp4 layers no header or marker names, malformed or half-stored
       ones;
     - torchao tensors under Black Forest Labs' key names;
-    - int8 mixed with nvfp4, scaled fp8 or torchao;
+    - int8 mixed with nvfp4, scaled fp8 or torchao, and torchao mixed with nvfp4;
     - packed input embedders, whose stored width is not the model's.
     """
     if problem := find_torchao_fp8_problem(state_dict):
@@ -137,6 +137,10 @@ def reject_unloadable_quantization(
         raise ValueError(f"This FLUX.3 file mixes int8 and torchao layers, which no release does. {_INSTEAD}")
     if int8_markers and nvfp4:
         raise ValueError(f"This FLUX.3 file mixes int8 and nvfp4 layers, which no release does. {_INSTEAD}")
+    if torchao and nvfp4:
+        # The nvfp4 re-layout reads Black Forest Labs' names; under diffusers' it would swap the halves of rows that are
+        # already in diffusers' order, and the image would be noise.
+        raise ValueError(f"This FLUX.3 file mixes torchao and nvfp4 layers, which no release does. {_INSTEAD}")
     if int8_markers:
         scaled_fp8 = sorted(
             weight_key
