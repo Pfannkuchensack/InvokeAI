@@ -107,6 +107,7 @@ export interface GenerationModelCatalogItem {
     height?: number | null;
     vae?: string | null;
     vae_precision?: string | null;
+    components?: Record<string, string> | null;
     weight?: number | null;
   } | null;
   [key: string]: unknown;

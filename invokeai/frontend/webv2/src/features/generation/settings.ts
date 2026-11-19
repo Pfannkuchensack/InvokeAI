@@ -53,7 +53,11 @@ export {
   getCompatibleReferenceImages,
   getDefaultGenerateSettings,
   withAddedReferenceImages,
+  getDefaultComponentSlotPolicies,
+  pruneClosedDefaultComponents,
   getGenerateModelSelectionResult,
+  getModelDefaultComponents,
+  getModelDefaultFills,
   isComponentCompatibleWithModel,
   getDimensionGrid,
   getGenerationDimensions,
@@ -90,6 +94,7 @@ export {
   type GenerationIssueFix,
 } from './core/generationIssues';
 export { hasArchitectureCapabilities } from './core/architectureCapabilities';
+export { DEFAULT_COMPONENT_SLOTS, type DefaultComponentSlot } from './core/componentDefaults';
 export {
   describeExternalCanvasRefusal,
   GEMINI_TEMPERATURE_MAX,

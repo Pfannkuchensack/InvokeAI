@@ -1,4 +1,9 @@
-import type { GenerateSettings, MainModelConfig, VaeModelConfig } from '@features/generation/core/types';
+import type {
+  ComponentModelConfig,
+  GenerateSettings,
+  MainModelConfig,
+  VaeModelConfig,
+} from '@features/generation/core/types';
 import type { TFunction } from 'i18next';
 
 import { seedArchitectureCapabilities } from '@features/generation/core/architectureCapabilities.testing';
@@ -254,5 +259,75 @@ describe('describeChanges', () => {
     expect(describeChanges(plan.changed, settings, after(settings, plan.patch), model, t, 'en')).toBe(
       'CFG 7.1254 → 7.125'
     );
+  });
+});
+
+describe('default components', () => {
+  const t5 = (key: string): ComponentModelConfig => ({ base: 'any', key, name: key, type: 't5_encoder' });
+  const clip: ComponentModelConfig = { base: 'any', key: 'clip', name: 'CLIP', type: 'clip_embed', variant: 'large' };
+  const defaultT5 = t5('t5-default');
+  const flux: MainModelConfig = {
+    base: 'flux',
+    default_settings: { components: { clip_embed_model: 'missing', t5_encoder: defaultT5.key } },
+    format: 'checkpoint',
+    key: 'flux-model',
+    name: 'FLUX',
+    type: 'main',
+  };
+  const catalog = [defaultT5, t5('t5-mine'), clip];
+  const settings = { ...getDefaultGenerateSettings(flux), clipEmbedModel: clip, t5EncoderModel: t5('t5-mine') };
+
+  it("applies the model's default component over the selection and tells it by the slot's name", () => {
+    const plan = getApplyModelDefaultsPlan(settings, flux, catalog);
+
+    expect(plan.patch).toEqual({ t5EncoderModel: defaultT5 });
+    expect(plan.defined).toEqual(['t5EncoderModel']);
+    expect(describeChanges(plan.changed, settings, after(settings, plan.patch), flux, t, 'en')).toBe(
+      'T5 Encoder t5-mine → t5-default'
+    );
+    // Once the default holds, there is nothing left to apply, but the model still sets something.
+    const applied = getApplyModelDefaultsPlan(after(settings, plan.patch), flux, catalog);
+
+    expect(applied.patch).toEqual({});
+    expect(applied.defined).toEqual(['t5EncoderModel']);
+  });
+
+  it('resets to the default component and keeps a slot whose default is not installed', () => {
+    const patch = getModelDefaultsPatch(settings, flux, catalog);
+
+    expect(patch.t5EncoderModel).toBe(defaultT5);
+    // The CLIP default names a model that is not installed, so the current selection is not touched.
+    expect(patch).not.toHaveProperty('clipEmbedModel');
+    expect(getChangedSettings(settings, after(settings, patch), flux)).toContain('t5EncoderModel');
+  });
+
+  it('clears the vision tower when the reset encoder closes its slot, and does not count that as a default', () => {
+    const encoder = (key: string, format: string): ComponentModelConfig => ({
+      base: 'any',
+      format,
+      key,
+      name: key,
+      type: 'qwen3_vl_encoder',
+      variant: 'qwen3_vl_8b',
+    });
+    const gguf = encoder('encoder-gguf', 'gguf_quantized');
+    const checkpoint = encoder('encoder-st', 'checkpoint');
+    const tower: ComponentModelConfig = { ...gguf, key: 'mmproj', name: 'mmproj', type: 'qwen3_vl_vision_tower' };
+    const model: MainModelConfig = {
+      base: 'qwen-image-2-1',
+      default_settings: { components: { qwen3_vl_encoder: checkpoint.key } },
+      format: 'gguf_quantized',
+      key: 'q21',
+      name: 'Qwen-Image-2.1',
+      type: 'main',
+    };
+    const current = { ...getDefaultGenerateSettings(model), qwen3VLEncoderModel: gguf, qwen3VLVisionTowerModel: tower };
+    const installed = [gguf, checkpoint, tower];
+    const patch = getModelDefaultsPatch(current, model, installed);
+    const plan = getApplyModelDefaultsPlan(current, model, installed);
+
+    expect(patch).toMatchObject({ qwen3VLEncoderModel: checkpoint, qwen3VLVisionTowerModel: null });
+    expect(plan.patch).toEqual({ qwen3VLEncoderModel: checkpoint, qwen3VLVisionTowerModel: null });
+    expect(plan.defined).toEqual(['qwen3VLEncoderModel']);
   });
 });
