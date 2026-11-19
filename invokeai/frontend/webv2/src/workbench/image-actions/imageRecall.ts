@@ -20,6 +20,8 @@ import {
   isIdeogram4SamplerPreset,
   deriveAspectRatioId,
   getCompatibleReferenceImages,
+  getComponentSlotsSuppliedByMain,
+  getComponentSlotsSuppliedBySource,
   getDimensionGrid,
   getExternalProviderOptionKeys,
   getExternalResolutionPresets,
@@ -398,29 +400,55 @@ const getMetadataMainModel = (
   models: readonly ComponentModelConfig[]
 ): MainModelConfig | null | undefined => getModelFromMetadata(metadata, key, models, isMainModelConfig);
 
+/** The key a record names its VAE under, whether or not the model resolves; older records use a base's own key. */
+const getRecordedVaeKey = (metadata: unknown, model: GenerateModelConfig): string | null => {
+  if (!isRecord(metadata)) {
+    return null;
+  }
+  const legacyKey = ({ 'qwen-image': 'qwen_image_vae', wan: 'wan_vae_model' } as Record<string, string>)[model.base];
+
+  return 'vae' in metadata ? 'vae' : legacyKey && legacyKey in metadata ? legacyKey : null;
+};
+
 const getMetadataVae = (
   metadata: unknown,
   model: GenerateModelConfig,
   vaeModels: VaeModelConfig[]
 ): VaeModelConfig | null | undefined => {
-  if (!isRecord(metadata)) {
-    return undefined;
-  }
-  const legacyKey = ({ 'qwen-image': 'qwen_image_vae', wan: 'wan_vae_model' } as Record<string, string>)[model.base];
-  if (!('vae' in metadata) && legacyKey && legacyKey in metadata) {
-    metadata = { ...metadata, vae: metadata[legacyKey] };
-  }
-  if (!isRecord(metadata) || !('vae' in metadata)) {
+  const key = getRecordedVaeKey(metadata, model);
+
+  if (!key || !isRecord(metadata)) {
     return undefined;
   }
 
-  if (metadata.vae === null) {
+  if (metadata[key] === null) {
     return null;
   }
 
-  const vae = resolveMetadataModel(metadata.vae, vaeModels);
+  const vae = resolveMetadataModel(metadata[key], vaeModels);
 
   return vae && isVaeCompatibleWithGenerateModel(model, vae) ? vae : undefined;
+};
+
+const getMetadataVaePrecision = (metadata: unknown): 'fp16' | 'fp32' | null => {
+  const precision = getString(metadata, 'vae_precision');
+
+  return precision === 'fp16' || precision === 'fp32' ? precision : null;
+};
+
+/** The decode settings a record restores onto `model`: only those its panel shows. Recall and its actions both ask. */
+const getMetadataVaeSettings = (
+  metadata: unknown,
+  model: GenerateModelConfig
+): Partial<Pick<GenerateWidgetValues, 'colorCompensation' | 'vaePrecision'>> => {
+  const policy = getGenerationUiPolicy(model);
+  const vaePrecision = getMetadataVaePrecision(metadata);
+  const colorCompensation = getBoolean(metadata, 'color_compensation');
+
+  return {
+    ...(vaePrecision !== null && policy.vaePrecisionVisible ? { vaePrecision } : {}),
+    ...(colorCompensation !== null && policy.colorCompensationVisible ? { colorCompensation } : {}),
+  };
 };
 
 const getPromptPatch = (
@@ -918,12 +946,9 @@ interface RecalledComponent {
 /**
  * The component keys the generation graphs record; a key missing here is silently dropped by Remix. The first
  * recorded key wins for a shared setting. The slots a model can store defaults for share their metadata key with
- * those defaults; the component source is recorded under per-family names instead, listed first.
+ * those defaults; the component source is recorded under per-family names instead, listed after the encoders.
  */
 const RECALLED_COMPONENTS: readonly RecalledComponent[] = [
-  { isMainModel: true, metadataKey: 'qwen3_source', setting: 'componentSourceModel' },
-  { isMainModel: true, metadataKey: 'qwen_image_component_source', setting: 'componentSourceModel' },
-  { isMainModel: true, metadataKey: 'wan_component_source', setting: 'componentSourceModel' },
   ...DEFAULT_COMPONENT_SLOTS.filter((slot) => slot.setting !== 'componentSourceModel').map(
     ({ isMainModel, persistenceKey, setting }) => ({
       ...(isMainModel ? { isMainModel } : {}),
@@ -931,6 +956,12 @@ const RECALLED_COMPONENTS: readonly RecalledComponent[] = [
       setting,
     })
   ),
+  // After the encoders: the model selection keeps a stored FLUX.2 source only beside the encoder it leaves to a
+  // standalone pick, and each entry is judged beside the ones before it.
+  { isMainModel: true, metadataKey: 'mistral_source', setting: 'componentSourceModel' },
+  { isMainModel: true, metadataKey: 'qwen3_source', setting: 'componentSourceModel' },
+  { isMainModel: true, metadataKey: 'qwen_image_component_source', setting: 'componentSourceModel' },
+  { isMainModel: true, metadataKey: 'wan_component_source', setting: 'componentSourceModel' },
 ];
 
 const getRecalledComponent = (
@@ -1409,6 +1440,7 @@ export const getImageRecallCapabilities = ({
   const hasPrompts = hasPrompt(metadata);
   const hasSize = hasMetadataSize(metadata, currentValues.model);
   const hasSettings = hasGenerationSettings(metadata, clipSkipModel);
+  const hasVaeSettings = Object.keys(getMetadataVaeSettings(metadata, clipSkipModel)).length > 0;
   const hasComponents = hasComponentModels(metadata, models);
   const referenceRecord = readMetadataReferenceImages(metadata);
   const recordedReferenceImages = referenceRecord.images;
@@ -1431,6 +1463,7 @@ export const getImageRecallCapabilities = ({
   const hasAnyMetadata =
     hasModel ||
     hasVae ||
+    hasVaeSettings ||
     hasPrompts ||
     hasSeed ||
     hasSize ||
@@ -1450,6 +1483,7 @@ export const getImageRecallCapabilities = ({
   const hasNonSeedMetadata =
     hasModel ||
     hasVae ||
+    hasVaeSettings ||
     hasPrompts ||
     hasSize ||
     hasSettings ||
@@ -1534,10 +1568,56 @@ export const buildImageRecallSettings = ({
     for (const setting of recordedSettings) {
       const component = componentPatch[setting];
 
+      // A Diffusers main records itself as its own source, which the builders fall back to without a pick. Clearing
+      // the slot reproduces that, where a source left in the panel would supply the components instead.
+      if (setting === 'componentSourceModel' && component?.key === effectiveModel.key) {
+        values = { ...values, componentSourceModel: null };
+        fittingSettings.push(setting);
+        continue;
+      }
+
       if (!component || isComponentCompatibleWithModel(effectiveModel, values, setting, component)) {
         values = { ...values, [setting]: component };
         fittingSettings.push(setting);
       }
+    }
+
+    // A record that names its source left out the slots the source supplied, and a main that is its own source the
+    // slots it bundles. Standalone picks left in the panel would take those slots over, so clear them to let the
+    // recorded source supply them again. The encoders judged are the ones that survive recall: a recorded one that is
+    // gone leaves the panel's, and with it the question whether the source still supplies the VAE.
+    const recordedSource = fittingSettings.includes('componentSourceModel')
+      ? componentPatch.componentSourceModel
+      : null;
+    // A slot the record names stays with the record, resolved or not: an uninstalled component is not one the source
+    // supplied, so the panel's own pick stays.
+    const recordsComponent = (setting: RecalledComponentSetting): boolean =>
+      RECALLED_COMPONENTS.some(
+        (component) => component.setting === setting && isRecord(metadata) && component.metadataKey in metadata
+      );
+    // The model selection below drops a pick the model does not accept, so only an accepted one counts here.
+    const survivingEncoder = (setting: 'mistralEncoderModel' | 'qwen3EncoderModel') => {
+      const encoder = values[setting];
+
+      return encoder && isComponentCompatibleWithModel(effectiveModel, values, setting, encoder) ? encoder : null;
+    };
+    const survivingEncoders = {
+      mistralEncoderModel: survivingEncoder('mistralEncoderModel'),
+      qwen3EncoderModel: survivingEncoder('qwen3EncoderModel'),
+    };
+    const suppliedBySource =
+      recordedSource && isMainModelConfig(recordedSource)
+        ? getComponentSlotsSuppliedBySource(effectiveModel, recordedSource, survivingEncoders)
+        : recordsComponent('componentSourceModel')
+          ? []
+          : getComponentSlotsSuppliedByMain(effectiveModel, survivingEncoders);
+    const clearedSettings = suppliedBySource.filter(
+      (key): key is RecalledComponentSetting & typeof key =>
+        key !== 'vae' && !recordsComponent(key as RecalledComponentSetting)
+    );
+
+    for (const setting of clearedSettings) {
+      values = { ...values, [setting]: null };
     }
 
     if (model) {
@@ -1596,6 +1676,12 @@ export const buildImageRecallSettings = ({
     if (vae !== undefined) {
       values = { ...values, vae };
       fields.push('vae');
+    } else if (suppliedBySource.includes('vae') && getRecordedVaeKey(metadata, values.model) === null && values.vae) {
+      values = { ...values, vae: null };
+
+      if (currentValues.vae) {
+        fields.push('vae');
+      }
     }
 
     if (model || fittingSettings.length > 0) {
@@ -1605,10 +1691,22 @@ export const buildImageRecallSettings = ({
       values = { ...values, ...settings };
     }
 
+    // After the transition, which resets what the model's panel does not show. Older records carry none.
+    const vaeSettings = getMetadataVaeSettings(metadata, values.model);
+
+    if (Object.keys(vaeSettings).length > 0) {
+      values = { ...values, ...vaeSettings };
+      if (!fields.includes('vae')) {
+        fields.push('vae');
+      }
+    }
+
     // Judged after the transition, which can complete or undo a recorded pick. The adapter switch is a component
     // change too: a record can turn it off without touching the pick.
     if (
-      recordedSettings.some((setting) => values[setting]?.key !== currentValues[setting]?.key) ||
+      [...recordedSettings, ...clearedSettings].some(
+        (setting) => values[setting]?.key !== currentValues[setting]?.key
+      ) ||
       values.animaInpaintAdapterEnabled !== currentValues.animaInpaintAdapterEnabled ||
       values.flux3PromptUpsamplerEnabled !== currentValues.flux3PromptUpsamplerEnabled
     ) {

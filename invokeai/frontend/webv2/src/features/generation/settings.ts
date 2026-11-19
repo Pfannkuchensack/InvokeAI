@@ -51,6 +51,8 @@ export {
   coerceSchedulerForGraph,
   createReferenceImageId,
   getCompatibleReferenceImages,
+  getComponentSlotsSuppliedByMain,
+  getComponentSlotsSuppliedBySource,
   getDefaultGenerateSettings,
   withAddedReferenceImages,
   getDefaultComponentSlotPolicies,
