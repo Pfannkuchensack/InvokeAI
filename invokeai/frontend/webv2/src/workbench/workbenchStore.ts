@@ -18,6 +18,7 @@ import { hasActiveQueueRuns, hasInFlightQueueRuns } from '@workbench/queue-integ
 import type { CanvasEditIntent } from './autoRoutePolicy';
 import type { CanvasProjectMutation } from './canvasProjectMutations';
 
+import { getBrowserId } from './browserId';
 import { clearLayerPanelStates, reconcileLayerPanelStates } from './layerPanelState';
 import { createLayoutPresetActivator, loadLayoutPresetWidgets } from './layoutPresetActivation';
 import { getLayoutPresetArrangement, resolveSavedLayoutPreset } from './layoutPresetSnapshots';
@@ -102,6 +103,11 @@ const createCommands = (
           ...(projectId ? { projectId } : {}),
         })
       ),
+    },
+    edit: {
+      abandonStep: command('abandonEditStep'),
+      selectChild: command('selectEditChild'),
+      start: command('startEditTree'),
     },
     canvas: {
       apply: (
@@ -498,13 +504,23 @@ const createCommands = (
       clearCompleted: command('clearCompletedQueueItems'),
       markBackendCancelled: command('markQueueItemBackendCancelled'),
       markBackendSubmitted: command('markQueueItemBackendSubmitted'),
+      markProjectQueueLoaded: command('settleStaleEditNodes', ({ projectId }: { projectId: string }) => ({
+        origin: getBrowserId(),
+        projectId,
+      })),
       noteFirstProgressFrame: command('noteQueueItemFirstProgressFrame'),
       recordSubmissionRetry: command('recordQueueItemSubmissionRetry'),
       setCancellationPending: command('setQueueItemCancellationPending'),
       setLocalRecoveryState: command('setQueueItemLocalRecoveryState'),
       routePartialResults: command('routeQueueItemPartialResults'),
       routeResults: command('routeQueueItemResults'),
-      reopenForRetry: command('reopenQueueItemForRetry'),
+      reopenForRetry: command(
+        'reopenQueueItemForRetry',
+        (payload: Omit<ActionPayload<'reopenQueueItemForRetry'>, 'origin'>) => ({
+          ...payload,
+          origin: getBrowserId(),
+        })
+      ),
       restoreFromJournal: command('restoreQueueItemsFromJournal'),
       stageRetriedCanvasResults: command('stageRetriedCanvasResults'),
       setConnectionStatus: command('setBackendConnectionStatus'),

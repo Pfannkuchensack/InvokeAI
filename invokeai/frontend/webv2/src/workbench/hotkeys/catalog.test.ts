@@ -1,3 +1,4 @@
+import { builtInLayoutPresetDescriptors } from '@workbench/layoutPresets';
 import { describe, expect, it } from 'vitest';
 
 import { firstPartyHotkeyCatalog, getRegionFocusDefaultKey, regionFocusHotkeys } from './catalog';
@@ -27,6 +28,18 @@ describe('firstPartyHotkeyCatalog', () => {
     const selectWorkflow = firstPartyHotkeyCatalog.find((hotkey) => hotkey.id === 'app.selectAutomatePreset');
 
     expect(selectWorkflow).toMatchObject({ defaultKeys: ['alt+4'], title: 'Select Workflow Preset' });
+  });
+
+  it('gives every built-in preset its own default key', () => {
+    const keys = builtInLayoutPresetDescriptors.map(({ defaultKeys, hotkeyId }) => {
+      expect(firstPartyHotkeyCatalog.find((hotkey) => hotkey.id === `app.${hotkeyId}`)?.defaultKeys).toEqual(
+        defaultKeys
+      );
+
+      return defaultKeys.join();
+    });
+
+    expect(new Set(keys).size).toBe(keys.length);
   });
 
   it('binds settings to the platform-standard shortcut, reachable from a text field', () => {

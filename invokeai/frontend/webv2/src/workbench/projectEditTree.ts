@@ -35,6 +35,10 @@ export interface EditTreeNode {
   width: number;
   height: number;
   createdAt: string;
+  /** Why a failed node failed, as the run reported it. */
+  error?: string;
+  /** The browser whose run settles a pending node; absent on nodes written without it, which are never auto-canceled. */
+  origin?: string;
   [field: string]: unknown;
 }
 
@@ -63,6 +67,7 @@ export interface EditStepInput {
   width: number;
   height: number;
   createdAt: string;
+  origin?: string;
   /** One pending node per variant. */
   variants: { id: string; seed: number }[];
 }
@@ -104,7 +109,9 @@ const parseNode = (candidate: unknown): EditTreeNode | null => {
     !Number.isSafeInteger(candidate.seed) ||
     !isPositiveInteger(candidate.width) ||
     !isPositiveInteger(candidate.height) ||
-    typeof candidate.createdAt !== 'string'
+    typeof candidate.createdAt !== 'string' ||
+    !(candidate.error === undefined || typeof candidate.error === 'string') ||
+    !(candidate.origin === undefined || typeof candidate.origin === 'string')
   ) {
     return null;
   }
@@ -294,6 +301,7 @@ export const addEditStep = (tree: ProjectEditTree, parentId: string, step: EditS
         imageName: null,
         instruction: step.instruction,
         parentId,
+        ...(step.origin === undefined ? {} : { origin: step.origin }),
         referenceImages: step.referenceImages,
         seed,
         settings: step.settings,
@@ -324,17 +332,36 @@ const updateNode = (
     : tree;
 };
 
-const settlePending = (status: 'failed' | 'canceled') => (node: EditTreeNode) =>
-  node.status === 'pending' ? { ...node, status } : null;
+/** A settled node no longer waits for any browser's run, so the id that named one does not stay in shared content. */
+const withoutOrigin = (node: EditTreeNode): EditTreeNode => {
+  const { origin: _origin, ...rest } = node;
+
+  return rest as EditTreeNode;
+};
+
+const settlePending = (status: 'failed' | 'canceled', error?: string) => (node: EditTreeNode) =>
+  node.status === 'pending' ? { ...withoutOrigin(node), ...(error === undefined ? {} : { error }), status } : null;
 
 /** A result for a node that was already canceled or failed is dropped. */
 export const completeEditNode = (tree: ProjectEditTree, nodeId: string, imageName: string): ProjectEditTree =>
   updateNode(tree, nodeId, 'complete an edit node', (node) =>
-    node.status === 'pending' ? { ...node, imageName, status: 'completed' } : null
+    node.status === 'pending' ? { ...withoutOrigin(node), imageName, status: 'completed' } : null
   );
 
-export const failEditNode = (tree: ProjectEditTree, nodeId: string): ProjectEditTree =>
-  updateNode(tree, nodeId, 'fail an edit node', settlePending('failed'));
+export const failEditNode = (tree: ProjectEditTree, nodeId: string, error?: string): ProjectEditTree =>
+  updateNode(tree, nodeId, 'fail an edit node', settlePending('failed', error));
+
+/** A failed or canceled node whose run is being retried is pending again. */
+export const reopenEditNode = (tree: ProjectEditTree, nodeId: string, origin?: string): ProjectEditTree =>
+  updateNode(tree, nodeId, 'reopen an edit node', (node) => {
+    if (node.status !== 'failed' && node.status !== 'canceled') {
+      return null;
+    }
+
+    const { error: _error, ...rest } = node;
+
+    return { ...rest, ...(origin === undefined ? {} : { origin }), status: 'pending' };
+  });
 
 export const cancelEditNode = (tree: ProjectEditTree, nodeId: string): ProjectEditTree =>
   updateNode(tree, nodeId, 'cancel an edit node', settlePending('canceled'));

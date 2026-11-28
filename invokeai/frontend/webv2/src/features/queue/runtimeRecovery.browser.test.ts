@@ -32,6 +32,7 @@ const openCanvasRuntime = (claimItemDelivery: QueueBackendPort['claimItemDeliver
   };
   const commands: QueueHistoryCommands = {
     markBackendCancelled: vi.fn(),
+    markProjectQueueLoaded: vi.fn(),
     noteFirstProgressFrame: vi.fn(),
     markBackendSubmitted: vi.fn(),
     recordError: vi.fn(),

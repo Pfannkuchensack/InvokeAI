@@ -15,6 +15,51 @@ const isBackendItemIdList = (value: unknown): value is number[] =>
   new Set(value).size === value.length &&
   value.every((item) => Number.isSafeInteger(item) && item > 0);
 
+const isNonEmptyString = (value: unknown): value is string => typeof value === 'string' && value.length > 0;
+
+/** An Edit link that does not read as one is dropped: the run still delivers its images, it just settles no nodes. */
+const normalizeEditLink = (
+  submission: WorkbenchQueueItem['snapshot']['backendSubmission']
+): WorkbenchQueueItem['snapshot']['backendSubmission'] => {
+  if (submission.kind !== 'generate' || submission.edit === undefined) {
+    return submission;
+  }
+
+  const edit: unknown = submission.edit;
+  const isValid =
+    isRecord(edit) &&
+    isNonEmptyString(edit.projectId) &&
+    isNonEmptyString(edit.rootNodeId) &&
+    isNonEmptyString(edit.stepId) &&
+    Array.isArray(edit.nodeIds) &&
+    edit.nodeIds.length > 0 &&
+    edit.nodeIds.every(isNonEmptyString);
+  const { edit: _dropped, ...rest } = submission;
+
+  if (!isValid) {
+    return rest;
+  }
+
+  // Item ids that do not read as one list per node only lose the mapping; the nodes still settle by position.
+  const hasItemIds =
+    edit.variantItemIds === undefined ||
+    (Array.isArray(edit.variantItemIds) &&
+      edit.variantItemIds.length === (edit.nodeIds as unknown[]).length &&
+      edit.variantItemIds.every(
+        (ids) => Array.isArray(ids) && ids.length > 0 && ids.every((id) => Number.isSafeInteger(id))
+      ));
+
+  if (hasItemIds) {
+    return submission;
+  }
+
+  const { variantItemIds: _dropIds, ...link } = submission.edit as typeof submission.edit & {
+    variantItemIds?: unknown;
+  };
+
+  return { ...submission, edit: link };
+};
+
 export const normalizeRestoredQueueItem = (value: unknown): WorkbenchQueueItem | null => {
   if (
     !isRecord(value) ||
@@ -36,6 +81,7 @@ export const normalizeRestoredQueueItem = (value: unknown): WorkbenchQueueItem |
       snapshot.backendSubmission.kind !== 'invalid') ||
     (snapshot.sourceId !== 'canvas' &&
       snapshot.sourceId !== 'generate' &&
+      snapshot.sourceId !== 'instruct' &&
       snapshot.sourceId !== 'upscale' &&
       snapshot.sourceId !== 'video' &&
       snapshot.sourceId !== 'workflow') ||
@@ -145,7 +191,9 @@ export const normalizeRestoredQueueItem = (value: unknown): WorkbenchQueueItem |
       ? { resultVideoNames: [...value.resultVideoNames] }
       : {}),
     snapshot: {
-      backendSubmission: snapshot.backendSubmission as WorkbenchQueueItem['snapshot']['backendSubmission'],
+      backendSubmission: normalizeEditLink(
+        snapshot.backendSubmission as WorkbenchQueueItem['snapshot']['backendSubmission']
+      ),
       canvas: {
         document: {
           bbox: { height: bbox.height, width: bbox.width, x: bbox.x, y: bbox.y },

@@ -8,12 +8,14 @@ import {
   isAccountScopeCurrent,
 } from '@platform/state/accountLifecycle';
 
+import type { EditRun } from './editSubmission';
 import type { InvocationSourceId, ResultDestination } from './invocationContracts';
 import type { SubmitResolvedInvocationDeps } from './invocationSubmit';
 import type { PrepareCanvasInvocationArgs } from './widgets/canvas/invoke/prepareCanvasInvocation';
 import type { WorkbenchCommands, WorkbenchQueries } from './workbenchStore';
 
 import { createDeferredResource } from './deferredResource';
+import { withEditRun } from './editSubmission';
 import { isInvocationRouteValid, resolveInvocationRoute } from './invocation';
 import { beginInvocationPreparation, endInvocationPreparation } from './invocationPreparation';
 import { submitResolvedInvocation } from './invocationSubmit';
@@ -21,6 +23,8 @@ import { submitResolvedInvocation } from './invocationSubmit';
 export interface ActiveInvocationSubmissionArgs {
   commands: WorkbenchCommands;
   destinationOverride?: ResultDestination;
+  /** An Edit step built from a node (Run again) instead of the composer. */
+  editRun?: EditRun;
   formatCanvasInvocationFailure: PrepareCanvasInvocationArgs['formatCanvasInvocationFailure'];
   formatUpscaleMetadataFailure: SubmitResolvedInvocationDeps['formatUpscaleMetadataFailure'];
   getModels: () => readonly ModelConfig[] | undefined;
@@ -74,6 +78,7 @@ export const submitActiveInvocation = async (
   {
     commands,
     destinationOverride,
+    editRun,
     formatCanvasInvocationFailure,
     formatUpscaleMetadataFailure,
     getModels,
@@ -92,10 +97,15 @@ export const submitActiveInvocation = async (
     ...active,
     ...(destinationOverride ? { destination: destinationOverride } : {}),
     ...(sourceId ? { sourceId, sourceLocked: true } : {}),
-    ...(sourceId === 'video' ? { destination: 'gallery' as const } : {}),
+    ...(sourceId === 'video' || sourceId === 'instruct' ? { destination: 'gallery' as const } : {}),
   };
   const models = getModels();
-  const route = resolveInvocationRoute(snapshot.activeProject, sourceId ? 'dialog' : 'global', invocation, models);
+  const route = resolveInvocationRoute(
+    editRun ? withEditRun(snapshot.activeProject, editRun) : snapshot.activeProject,
+    sourceId ? 'dialog' : 'global',
+    invocation,
+    models
+  );
 
   if (!isInvocationRouteValid(route) || snapshot.backendConnection.status !== 'connected') {
     return;
@@ -126,6 +136,7 @@ export const submitActiveInvocation = async (
       prepareCanvasInvocation,
       ...(prepend ? { prepend } : {}),
       project: snapshot.activeProject,
+      ...(editRun ? { editRun } : {}),
       route,
       scopedDefaults: snapshot.scopedDefaults,
     });

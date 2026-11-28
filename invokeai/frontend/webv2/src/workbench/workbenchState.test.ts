@@ -1535,7 +1535,14 @@ describe('workbench layout presets', () => {
       type: 'addLayoutPreset',
     });
 
-    expect(state.account.layoutPresetOrder).toEqual(['compose', 'edit', 'video', 'automate', 'custom-layout-1']);
+    expect(state.account.layoutPresetOrder).toEqual([
+      'compose',
+      'edit',
+      'video',
+      'automate',
+      'instruct',
+      'custom-layout-1',
+    ]);
 
     state = workbenchReducer(state, {
       activeId: 'custom-layout-1',
@@ -1543,11 +1550,18 @@ describe('workbench layout presets', () => {
       type: 'reorderLayoutPresets',
     });
 
-    expect(state.account.layoutPresetOrder).toEqual(['compose', 'custom-layout-1', 'edit', 'video', 'automate']);
+    expect(state.account.layoutPresetOrder).toEqual([
+      'compose',
+      'custom-layout-1',
+      'edit',
+      'video',
+      'automate',
+      'instruct',
+    ]);
 
     state = workbenchReducer(state, { presetId: 'custom-layout-1', type: 'deleteLayoutPreset' });
 
-    expect(state.account.layoutPresetOrder).toEqual(['compose', 'edit', 'video', 'automate']);
+    expect(state.account.layoutPresetOrder).toEqual(['compose', 'edit', 'video', 'automate', 'instruct']);
   });
 
   it('normalizes stale and duplicate preset ids when hydrating an account', () => {
@@ -1569,7 +1583,14 @@ describe('workbench layout presets', () => {
       type: 'hydrateWorkbench',
     });
 
-    expect(state.account.layoutPresetOrder).toEqual(['compose', 'edit', 'video', 'automate', 'custom-layout-1']);
+    expect(state.account.layoutPresetOrder).toEqual([
+      'compose',
+      'edit',
+      'video',
+      'automate',
+      'instruct',
+      'custom-layout-1',
+    ]);
   });
 
   it('drops preset snapshots with invalid widget and layout references', () => {
@@ -3874,7 +3895,7 @@ describe('workbench account and project settings', () => {
       activeLayoutPresetId: 'compose',
       customLayoutPresets: [],
       layoutPresetMetadataOverrides: {},
-      layoutPresetOrder: ['compose', 'edit', 'video', 'automate'],
+      layoutPresetOrder: ['compose', 'edit', 'video', 'automate', 'instruct'],
       layoutPresetOverrides: {},
       layoutPresetRouteOverrides: {},
     });

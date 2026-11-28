@@ -108,7 +108,9 @@ export const isBatchCountFixed = (sourceId: InvocationRoute['sourceId'], values:
   sourceId === 'upscale' && isUpscaleBatchCountFixed(values);
 
 export const getBatchCount = (sourceId: InvocationRoute['sourceId'], values: Record<string, unknown>): number =>
-  isBatchCountFixed(sourceId, values) ? 1 : sanitizeBatchCount(values.batchCount);
+  isBatchCountFixed(sourceId, values)
+    ? 1
+    : sanitizeBatchCount(sourceId === 'instruct' ? values.variants : values.batchCount);
 
 export interface InvocationState {
   batchCount: number;
@@ -152,7 +154,7 @@ export const useInvocationState = ({ sourceId }: { sourceId?: InvocationSourceId
       sourceId
         ? {
             ...routeInput.invocation,
-            ...(sourceId === 'video' ? { destination: 'gallery' as const } : {}),
+            ...(sourceId === 'video' || sourceId === 'instruct' ? { destination: 'gallery' as const } : {}),
             sourceId,
             sourceLocked: true,
           }
@@ -181,9 +183,11 @@ export const useInvocationState = ({ sourceId }: { sourceId?: InvocationSourceId
       ? routeInput.upscaleValues
       : invocation.sourceId === 'video'
         ? routeInput.videoValues
-        : invocation.sourceId === 'workflow'
-          ? routeInput.workflowValues
-          : routeInput.generateValues;
+        : invocation.sourceId === 'instruct'
+          ? routeInput.instructValues
+          : invocation.sourceId === 'workflow'
+            ? routeInput.workflowValues
+            : routeInput.generateValues;
 
   // Video reads its own normalized values, so the count follows what its submission expands.
   const videoValues = invocation.sourceId === 'video' ? normalizeVideoWidgetValues(routeInput.videoValues) : null;

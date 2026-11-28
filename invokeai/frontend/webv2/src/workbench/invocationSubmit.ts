@@ -23,9 +23,11 @@ import { queryClient } from '@platform/query/client';
 import { isAccountScopeCurrent } from '@platform/state/accountLifecycle';
 import { getApiErrorMessage } from '@platform/transport/http';
 
+import type { EditRun, EditStepPlan } from './editSubmission';
 import type { PrepareCanvasInvocationArgs } from './widgets/canvas/invoke/prepareCanvasInvocation';
 import type { WorkbenchCommands } from './workbenchStore';
 
+import { prepareEditStep } from './editSubmission';
 import { getDynamicPromptsExpansionSource } from './invocation';
 import { captureInvocationRuntimeInputs } from './invocationPreparation';
 import { getActiveProjectWorkflow } from './projectWorkflows';
@@ -44,6 +46,10 @@ const EXPANSION_UNREACHABLE_MESSAGE = {
 const GENERATOR_FAILED_TITLE = {
   title: 'The batch generator could not be resolved',
   titleKey: 'topbar.invoke.generatorFailed',
+};
+const EDIT_STEP_FAILED_TITLE = {
+  title: 'The edit step could not be prepared',
+  titleKey: 'widgets.instruct.stepNotPrepared',
 };
 const BATCH_NOT_READY_TITLE = { title: 'The batch is not ready', titleKey: 'topbar.invoke.batchNotReady' };
 
@@ -74,6 +80,7 @@ const readModelOnlyUpscaleSourceMetadata = (
 };
 
 export interface SubmitResolvedInvocationDeps {
+  editRun?: EditRun;
   route: ResolvedInvocationRoute;
   project: Project;
   scopedDefaults: ScopedDefaults;
@@ -179,6 +186,7 @@ const resolveWorkflowGeneratorsForRoute = async (
 
 export const submitResolvedInvocation = async ({
   commands,
+  editRun,
   formatCanvasInvocationFailure,
   formatUpscaleMetadataFailure,
   models,
@@ -250,6 +258,7 @@ export const submitResolvedInvocation = async ({
     await dispatchResolvedInvocation(
       {
         commands,
+        editRun,
         formatCanvasInvocationFailure,
         formatUpscaleMetadataFailure,
         models,
@@ -274,6 +283,7 @@ export const submitResolvedInvocation = async ({
   await dispatchResolvedInvocation(
     {
       commands,
+      editRun,
       formatCanvasInvocationFailure,
       formatUpscaleMetadataFailure,
       models,
@@ -296,6 +306,7 @@ export const submitResolvedInvocation = async ({
 const dispatchResolvedInvocation = async (
   {
     commands,
+    editRun,
     formatCanvasInvocationFailure,
     formatUpscaleMetadataFailure,
     models,
@@ -359,8 +370,32 @@ const dispatchResolvedInvocation = async (
     return;
   }
 
+  const runtime = captureInvocationRuntimeInputs(route.sourceId);
+  let editStep: EditStepPlan | undefined;
+
+  if (route.sourceId === 'instruct') {
+    try {
+      editStep = await prepareEditStep({ defaults: scopedDefaults, models, project, run: editRun, runtime });
+    } catch (error) {
+      if (isAccountScopeCurrent(owner)) {
+        commands.notifications.add({
+          kind: 'error',
+          message: getApiErrorMessage(error, String(error)),
+          title: EDIT_STEP_FAILED_TITLE.title,
+          titleKey: EDIT_STEP_FAILED_TITLE.titleKey,
+        });
+      }
+      return;
+    }
+
+    if (!isAccountScopeCurrent(owner)) {
+      return;
+    }
+  }
+
   commands.generation.submitResolved({
-    runtime: captureInvocationRuntimeInputs(route.sourceId),
+    runtime,
+    ...(editStep ? { editStep } : {}),
     backendSupportsCancellation: true,
     models,
     ...expansion,

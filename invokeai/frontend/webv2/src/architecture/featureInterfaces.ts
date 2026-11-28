@@ -36,6 +36,7 @@ export const FEATURE_PUBLIC_INTERFACES: Readonly<Record<string, readonly string[
     'widget',
   ],
   identity: ['launchpad'],
+  instruct: ['widget'],
   intermediates: ['holdLease', 'settingsContribution'],
   models: ['architectures', 'architecturesStore', 'launchpad', 'react'],
   nodes: [],

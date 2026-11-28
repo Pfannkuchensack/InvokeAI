@@ -234,10 +234,19 @@ const surfaces = [
     path: representativeProjectPath,
     ready: async (page) => {
       await waitForWorkbench(page);
-      await selectLayoutPreset(page, 'Edit', 'Canvas');
+      await selectLayoutPreset(page, 'Canvas', 'Canvas');
       await waitForRenderedMedia(page, { canvas: true });
       await page.getByRole('tab', { exact: true, name: 'Properties', selected: true }).waitFor();
       await page.getByRole('tabpanel').getByRole('group', { exact: true, name: 'Layer' }).waitFor();
+    },
+  },
+  {
+    id: 'workbench-edit-empty-representative',
+    path: representativeProjectPath,
+    ready: async (page) => {
+      await waitForWorkbench(page);
+      await selectLayoutPreset(page, 'Edit', 'Edit');
+      await page.getByText('Edit an image step by step', { exact: true }).waitFor();
     },
   },
   {
@@ -245,7 +254,7 @@ const surfaces = [
     path: representativeProjectPath,
     ready: async (page) => {
       await waitForWorkbench(page);
-      await selectLayoutPreset(page, 'Edit', 'Canvas');
+      await selectLayoutPreset(page, 'Canvas', 'Canvas');
       await waitForRenderedMedia(page, { canvas: true });
       const spline = page.getByRole('button', { exact: true, name: 'Spline Edit' });
       await spline.waitFor();
@@ -280,7 +289,7 @@ const surfaces = [
       assert.ok(seeded.ok, `Could not seed control models: ${String(seeded.status)}.`);
       await withBrowserNavigation(page, () => page.reload({ waitUntil: 'domcontentloaded' }));
       await waitForWorkbench(page);
-      await selectLayoutPreset(page, 'Edit', 'Canvas');
+      await selectLayoutPreset(page, 'Canvas', 'Canvas');
       await waitForRenderedMedia(page, { canvas: true });
       // The seeded control models are SDXL, so switch to an SDXL main.
       await page.getByText('Fixture Model 001', { exact: true }).click();
@@ -405,7 +414,7 @@ const runShortcutGuideJourney = async (browser) => {
     try {
       await waitForWorkbench(page);
       await page.waitForFunction((theme) => document.documentElement.dataset.theme === theme, themeId);
-      await selectLayoutPreset(page, 'Edit', 'Canvas');
+      await selectLayoutPreset(page, 'Canvas', 'Canvas');
       await waitForRenderedMedia(page, { canvas: true });
       const viewTool = page
         .getByRole('toolbar', { exact: true, name: 'Tools' })
@@ -972,7 +981,7 @@ const runTopbarMenuJourney = async (browser) => {
     }));
     assert.equal(presetLayoutMetrics.scrollWidth, presetLayoutMetrics.clientWidth);
 
-    await page.getByRole('tab', { name: /^Edit(?:, unsaved changes)?$/ }).click({ button: 'right' });
+    await page.getByRole('tab', { name: /^Canvas(?:, unsaved changes)?$/ }).click({ button: 'right' });
     const switchLayout = page.getByRole('menuitem', { exact: true, name: 'Switch to this layout' });
     await switchLayout.waitFor();
     assert.equal(await switchLayout.locator('svg.lucide-check').count(), 0);
@@ -1167,7 +1176,7 @@ const runKeepAliveStateJourney = async (browser) => {
     );
     await waitForSettledDocument(page);
 
-    await selectLayoutPreset(page, 'Edit', 'Canvas');
+    await selectLayoutPreset(page, 'Canvas', 'Canvas');
     await waitForRenderedMedia(page, { canvas: true });
 
     const zoomTrigger = page.getByRole('button', { name: /^Zoom \d+%$/ });
@@ -1178,7 +1187,7 @@ const runKeepAliveStateJourney = async (browser) => {
 
     await selectLayoutPreset(page, 'Workflow', 'Workflow');
     await waitForSettledDocument(page);
-    await selectLayoutPreset(page, 'Edit', 'Canvas');
+    await selectLayoutPreset(page, 'Canvas', 'Canvas');
     await waitForRenderedMedia(page, { canvas: true });
     await waitForSettledDocument(page);
 
@@ -1225,7 +1234,7 @@ const runLayersPanesJourney = async (browser) => {
 
   try {
     await waitForWorkbench(page);
-    await selectLayoutPreset(page, 'Edit', 'Canvas');
+    await selectLayoutPreset(page, 'Canvas', 'Canvas');
     await waitForRenderedMedia(page, { canvas: true });
     const propertiesTab = page.getByRole('tab', { exact: true, name: 'Properties' });
     await propertiesTab.waitFor();
@@ -1676,7 +1685,7 @@ const runNativeWidgetRecoveryJourney = async (browser, failures, activeWorker = 
     await waitForWorkbench(page);
     let canvasUndoName;
     if (failures > 1) {
-      await selectLayoutPreset(page, 'Edit', 'Canvas');
+      await selectLayoutPreset(page, 'Canvas', 'Canvas');
       await page.getByRole('button', { name: 'Add layer', exact: true }).click();
       await page.getByRole('menuitem', { name: 'Raster layer', exact: true }).click();
       const undo = page.getByRole('button', { name: /^Undo: / });
@@ -1722,7 +1731,7 @@ const runNativeWidgetRecoveryJourney = async (browser, failures, activeWorker = 
       await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
       assert.equal(await page.evaluate(() => performance.timeOrigin), before);
       assert.equal(await prompt.inputValue(), draft);
-      await selectLayoutPreset(page, 'Edit', 'Canvas');
+      await selectLayoutPreset(page, 'Canvas', 'Canvas');
       const retainedUndo = page.getByRole('button', { name: canvasUndoName, exact: true });
       assert.equal(await retainedUndo.isEnabled(), true, 'Cancel must retain real Canvas undo, across layout hiding.');
       await selectLayoutPreset(page, 'Compose', 'Preview');

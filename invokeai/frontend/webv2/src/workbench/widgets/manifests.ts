@@ -6,6 +6,7 @@ import { diagnosticsWidgetManifest } from './diagnostics/manifest';
 import { galleryWidgetManifest } from './gallery/manifest';
 import { generateWidgetManifest } from './generate/manifest';
 import { imageMapWidgetManifest } from './image-map/manifest';
+import { instructWidgetManifest } from './instruct/manifest';
 import { layersWidgetManifest } from './layers/manifest';
 import { notificationsWidgetManifest } from './notifications/manifest';
 import { previewWidgetManifest } from './preview/manifest';
@@ -23,6 +24,7 @@ export const firstPartyWidgetManifests: WidgetManifest[] = [
   workflowWidgetManifest,
   upscaleWidgetManifest,
   videoWidgetManifest,
+  instructWidgetManifest,
   canvasWidgetManifest,
   diagnosticsWidgetManifest,
   galleryWidgetManifest,

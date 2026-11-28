@@ -2,15 +2,15 @@
   "build": {
     "launchpad": {
       "baseline": {
-        "brotliBytes": 830334,
+        "brotliBytes": 831042,
         "cssRawBytes": 2159,
         "fontRawBytes": 219480,
-        "gzipBytes": 829214,
+        "gzipBytes": 830036,
         "imageRawBytes": 44398,
-        "initialRawBytes": 2150769,
+        "initialRawBytes": 2154554,
         "largestAssetRawBytes": 770754,
         "otherAssetRawBytes": 0,
-        "ownedRawBytes": 117351,
+        "ownedRawBytes": 117443,
         "requestCount": 34,
         "scriptRequestCount": 18,
         "sourceOwners": [
@@ -365,15 +365,15 @@
     },
     "editor": {
       "baseline": {
-        "brotliBytes": 1311241,
+        "brotliBytes": 1316501,
         "cssRawBytes": 2159,
         "fontRawBytes": 219480,
-        "gzipBytes": 1303506,
+        "gzipBytes": 1310988,
         "imageRawBytes": 44398,
-        "initialRawBytes": 3629744,
+        "initialRawBytes": 3654463,
         "largestAssetRawBytes": 770754,
         "otherAssetRawBytes": 0,
-        "ownedRawBytes": 178885,
+        "ownedRawBytes": 182775,
         "requestCount": 70,
         "scriptRequestCount": 54,
         "sourceOwners": [
@@ -498,6 +498,7 @@
           "source:src/app/GenerateWidgetSyncRuntime.tsx",
           "source:src/app/GenerationUiAdapter.tsx",
           "source:src/app/I18nController.tsx",
+          "source:src/app/InstructUiAdapter.tsx",
           "source:src/app/ModelsUiAdapter.tsx",
           "source:src/app/QueueRuntimeAdapter.tsx",
           "source:src/app/QueueUiAdapter.tsx",
@@ -642,6 +643,12 @@
           "source:src/features/identity/ui/SessionExpiryNotice.tsx",
           "source:src/features/identity/ui/SetupScreen.tsx",
           "source:src/features/identity/ui/useIdentityNotify.ts",
+          "source:src/features/instruct/core/history.ts",
+          "source:src/features/instruct/core/references.ts",
+          "source:src/features/instruct/core/size.ts",
+          "source:src/features/instruct/core/values.ts",
+          "source:src/features/instruct/index.ts",
+          "source:src/features/instruct/ui/InstructUiContext.tsx",
           "source:src/features/intermediates/data/focus.ts",
           "source:src/features/intermediates/holdLease.ts",
           "source:src/features/intermediates/index.ts",
@@ -884,6 +891,7 @@
           "source:src/workbench/activeInvocationSubmission.ts",
           "source:src/workbench/autoRoutePolicy.ts",
           "source:src/workbench/bootWidgetPreload.ts",
+          "source:src/workbench/browserId.ts",
           "source:src/workbench/canvas-engine/api.ts",
           "source:src/workbench/canvas-engine/capabilities.ts",
           "source:src/workbench/canvas-engine/contracts.ts",
@@ -932,6 +940,8 @@
           "source:src/workbench/controlTypes.ts",
           "source:src/workbench/deferredResource.ts",
           "source:src/workbench/diagnostics/loggingPreferences.ts",
+          "source:src/workbench/editSubmission.ts",
+          "source:src/workbench/editTreeRouting.ts",
           "source:src/workbench/extensions/contributionSource.ts",
           "source:src/workbench/extensions/extensionRegistry.ts",
           "source:src/workbench/floatingWindows.ts",
@@ -1164,6 +1174,7 @@
           "source:src/workbench/widgets/generate/manifest.ts",
           "source:src/workbench/widgets/image-map/manifest.ts",
           "source:src/workbench/widgets/image-map/settingsContribution.ts",
+          "source:src/workbench/widgets/instruct/manifest.ts",
           "source:src/workbench/widgets/layers/layerPropertiesRequestStore.ts",
           "source:src/workbench/widgets/layers/layerTypeIcon.ts",
           "source:src/workbench/widgets/layers/manifest.ts",
@@ -1195,7 +1206,7 @@
       "source": "src/app/WorkbenchApp.tsx"
     }
   },
-  "capturedAt": "2026-11-27",
+  "capturedAt": "2026-11-28",
   "developmentInvalidation": {
     "platformUiBarrel": {
       "specifier": "@platform/ui",

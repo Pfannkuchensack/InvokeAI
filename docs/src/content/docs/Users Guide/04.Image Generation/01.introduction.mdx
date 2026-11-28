@@ -11,7 +11,7 @@ import generatePanel from '../assets/generate-panel-overview.png';
 
 The **Generate** panel is where you create still images from a text prompt. This page gets you started: choosing a model, writing a prompt and generating a first image, and choosing whether results go to the Gallery or the Canvas. The [Generate Panel Reference](/users-guide/image-generation/generate-panel/) then describes every section of the panel in detail.
 
-The Generate panel sits in the left rail of the **Compose** layout (**Alt+1**), where finished images appear in the Preview in the center of the screen. It is also in the **Edit** layout (**Alt+2**), next to the Canvas. Press **1** to bring it to the front, or **Alt+A** to jump straight to its prompt. See [The Workbench](/users-guide/workbench/introduction/) for how layouts and panels work.
+The Generate panel sits in the left rail of the **Compose** layout (**Alt+1**), where finished images appear in the Preview in the center of the screen. It is also in the **Canvas** layout (**Alt+2**), next to the Canvas. Press **1** to bring it to the front, or **Alt+A** to jump straight to its prompt. See [The Workbench](/users-guide/workbench/introduction/) for how layouts and panels work.
 
 The panel is divided into sections: the model picker and prompts at the top, followed by **Size**, **Guidance**, **Render**, **Components** and **Advanced**. Which sections and fields you see depends on the selected model, and each section header shows a summary of its settings, so you can keep sections you rarely change collapsed.
 
@@ -68,7 +68,7 @@ The route lives in the **Invoke** card. Hover over **Invoke** to see it, or open
 * **Destination** chooses **Gallery** or **Canvas**. Video always goes to the Gallery, so with Video as the source there is nothing to choose.
 * The lock button beside **Source** keeps the route fixed. While the route is locked, a small dot shows on the corner of **Invoke**.
 
-The route also follows your work. When you change a setting in a different panel, that panel becomes the source, and the destination changes to match: the Canvas sends results to the Canvas, and the other panels send them to the Gallery. For example, editing the prompt in the Generate panel while you are in the Edit layout sends the next results to the Gallery. Lock the routing if you want results to keep going to one place while you work in several panels. To send a single run to the other destination without changing the route, press **Alt+Ctrl+Enter** (**Alt+Cmd+Enter** on macOS).
+The route also follows your work. When you change a setting in a different panel, that panel becomes the source, and the destination changes to match: the Canvas sends results to the Canvas, and the other panels send them to the Gallery. For example, editing the prompt in the Generate panel while you are in the Canvas layout sends the next results to the Gallery. Lock the routing if you want results to keep going to one place while you work in several panels. To send a single run to the other destination without changing the route, press **Alt+Ctrl+Enter** (**Alt+Cmd+Enter** on macOS).
 
 The route is saved with the project, so each project remembers where its results go. See [Projects](/users-guide/projects/introduction/#what-a-project-keeps) for everything a project keeps.
 

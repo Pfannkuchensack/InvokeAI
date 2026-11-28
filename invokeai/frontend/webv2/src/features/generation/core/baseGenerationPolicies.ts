@@ -3463,7 +3463,11 @@ export const NO_GENERATE_MODEL_ISSUE: GenerationIssue = issue(
   MODEL_TARGET
 );
 
-const getComponentValidationIssues = (model: GenerateModelConfig, settings: GenerateSettings): GenerationIssue[] => {
+/** Missing or unfit components and the family's component rules: what Generate and Edit both refuse to run with. */
+export const getComponentValidationIssues = (
+  model: GenerateModelConfig,
+  settings: GenerateSettings
+): GenerationIssue[] => {
   const policy = getComponentSectionPolicy(model, settings);
   const ctx = getComponentPolicyContext(model, settings);
 

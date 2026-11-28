@@ -14,6 +14,7 @@ export type {
   QueueBackendGraph,
   QueueCounts,
   QueueCompiledSubmission,
+  QueueEditLink,
   QueueItemIdsReadModel,
   QueueItemProgress,
   QueueItemReadModel,

@@ -5,6 +5,7 @@ import type { QueueSourceId } from '@features/queue/core/types';
 export const QUEUE_SOURCE_RESULT_NODE_IDS: Readonly<Partial<Record<QueueSourceId, readonly string[]>>> = {
   canvas: ['canvas_output'],
   generate: ['canvas_output'],
+  instruct: ['canvas_output'],
   upscale: ['upscale_output'],
   video: ['video_output'],
 };
@@ -19,6 +20,7 @@ export const getQueueSourceResultSelection = (sourceId: QueueSourceId): { result
 /** Source kinds whose pending queue items the runtime enqueues to the backend. */
 export const BACKEND_SUBMITTABLE_SOURCE_IDS = [
   'generate',
+  'instruct',
   'workflow',
   'upscale',
   'video',

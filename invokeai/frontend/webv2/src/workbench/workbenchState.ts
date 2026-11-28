@@ -104,7 +104,9 @@ import { WIDGET_REGIONS } from '@workbench/layoutContracts';
 import { prependProjectEvent, PROJECT_EVENT_LIMIT } from '@workbench/projectEvents';
 import { createProjectId } from '@workbench/projects/ids';
 
+import type { EditStepPlan } from './editSubmission';
 import type { InvocationRuntimeInputs } from './invocationContracts';
+import type { ProjectEditTree } from './projectEditTree';
 import type { WorkbenchQueueItem as QueueItem } from './queueHistoryContracts';
 
 import {
@@ -125,8 +127,23 @@ import {
   pickStagedSlotAutoSwitch,
   type CanvasProjectMutation,
 } from './canvasProjectMutations';
+import { withEditRun } from './editSubmission';
+import {
+  abandonEditStep,
+  recordEditVariantItems,
+  reopenEditItemNodes,
+  settleEditTreeFromQueue,
+  settleStaleEditNodes,
+} from './editTreeRouting';
 import { gateProjectCanvases } from './projectCanvasGate';
-import { readStoredEditTree } from './projectEditTree';
+import {
+  addEditStep,
+  createEditTree,
+  getEditableEditTree,
+  getEditNode,
+  readStoredEditTree,
+  selectEditChild,
+} from './projectEditTree';
 import {
   addProjectWorkflow,
   applyProjectWorkflowAction,
@@ -447,7 +464,13 @@ type WorkbenchReducerAction =
       projectId: string;
       workflowId?: string;
       upscaleSourceMetadata?: UpscaleSourceMetadata;
+      /** The Edit step compiled for an `instruct` route. */
+      editStep?: EditStepPlan;
     } & Partial<ExpandedPositivePrompts>)
+  | { type: 'startEditTree'; projectId: string; source: { imageName: string; width: number; height: number } }
+  | { type: 'selectEditChild'; projectId: string; branchId: string; childId: string }
+  | { type: 'settleStaleEditNodes'; projectId: string; origin: string }
+  | { type: 'abandonEditStep'; projectId: string; stepId: string }
   | {
       type: 'submitModelOnlyUpscale';
       runtime: Pick<InvocationRuntimeInputs, 'boardDestinationIds'>;
@@ -509,6 +532,7 @@ type WorkbenchReducerAction =
   | { type: 'restoreQueueItemsFromJournal'; projectId: string; items: unknown[] }
   | {
       type: 'reopenQueueItemForRetry';
+      origin?: string;
       projectId: string;
       queueItemId: string;
       retriedItems: { itemId: number; sourceItemId: number }[];
@@ -1916,6 +1940,8 @@ const defaultWidgetInstanceTypes: Record<WidgetInstanceId, WidgetTypeId> = {
   'gallery:center': 'gallery',
   generate: 'generate',
   'image-map': 'image-map',
+  instruct: 'instruct',
+  'instruct:center': 'instruct',
   upscale: 'upscale',
   video: 'video',
   layers: 'layers',
@@ -2111,6 +2137,10 @@ const getCenterWidgetIdFromViewId = (centerViewId: CenterViewId): WidgetInstance
 
   if (centerViewId === 'workflow') {
     return 'workflow:center';
+  }
+
+  if (centerViewId === 'instruct') {
+    return 'instruct:center';
   }
 
   return centerViewId;
@@ -2633,7 +2663,7 @@ const cloneLayoutPresetSnapshot = (snapshot: LayoutPresetSnapshot): LayoutPreset
   });
 };
 
-const centerViewIds = new Set<CenterViewId>(['canvas', 'gallery', 'preview', 'workflow']);
+const centerViewIds = new Set<CenterViewId>(['canvas', 'gallery', 'instruct', 'preview', 'workflow']);
 
 const isLayoutPresetWidgetInstance = (instanceId: string, value: unknown): boolean => {
   if (!value || typeof value !== 'object') {
@@ -3993,6 +4023,8 @@ const enqueueCompiledSnapshot = (
     workflow?: Omit<WorkflowSubmissionPlan, 'graph'>;
     /** The project workflow the graph was compiled from; results and seed advances return to it. */
     projectWorkflowId?: string;
+    /** An Edit step; its nodes are already in the tree. */
+    editStep?: EditStepPlan;
   },
   backendSupportsCancellation: boolean,
   canvasSnapshot?: CanvasStateContractV3,
@@ -4036,7 +4068,8 @@ const enqueueCompiledSnapshot = (
   const libraryWorkflowSource = compiled.projectWorkflowId
     ? project.workflows.entries.find((entry) => entry.document.id === compiled.projectWorkflowId)?.source
     : undefined;
-  const backendSubmission: QueueCompiledSubmission = !backendGraph
+  const { editStep } = compiled;
+  const composedSubmission: QueueCompiledSubmission = !backendGraph
     ? { error: `${route.sourceId} queue item is missing a compiled backend graph.`, kind: 'invalid' }
     : route.sourceId === 'workflow'
       ? !compiled.workflow
@@ -4068,6 +4101,27 @@ const enqueueCompiledSnapshot = (
             seedNodeId: generate?.seedNodeId ?? 'seed',
           }
         : { error: `${route.sourceId} queue item is missing source submission metadata.`, kind: 'invalid' };
+  const backendSubmission: QueueCompiledSubmission =
+    editStep && backendGraph
+      ? {
+          batchCount: editStep.step.variants.length,
+          edit: {
+            nodeIds: editStep.step.variants.map((variant) => variant.id),
+            projectId: project.id,
+            rootNodeId: editStep.rootNodeId,
+            stepId: editStep.step.stepId,
+          },
+          graph: backendGraph,
+          kind: 'generate',
+          negativePrompt: '',
+          negativePromptNodeId: editStep.compiled.negativePromptNodeId,
+          positivePrompt: editStep.instruction,
+          positivePromptNodeId: editStep.compiled.positivePromptNodeId,
+          seed: editStep.seed,
+          seedNodeId: editStep.compiled.seedNodeId,
+          seedStep: editStep.seedStep,
+        }
+      : composedSubmission;
   // A workflow compiles every node's board in (Auto included), so its board-less results stay Uncategorized.
   const galleryBoardId =
     route.sourceId === 'workflow'
@@ -4079,8 +4133,9 @@ const enqueueCompiledSnapshot = (
   const generatePresentationSettings = normalizeGenerateSettings(widgetStates.generate?.values);
   const videoPresentationDimensions =
     route.sourceId === 'video' && videoSettings?.model ? getVideoDimensions(videoSettings.model, videoSettings) : null;
-  const presentationDimensions =
-    route.sourceId === 'upscale' && upscaleSettings?.inputImage
+  const presentationDimensions = editStep
+    ? { height: editStep.step.height, width: editStep.step.width }
+    : route.sourceId === 'upscale' && upscaleSettings?.inputImage
       ? getUpscaleOutputDimensions(upscaleSettings.inputImage, upscaleSettings)
       : videoPresentationDimensions
         ? videoPresentationDimensions
@@ -4142,7 +4197,9 @@ const enqueueCompiledSnapshot = (
                   (compiled.workflow?.batchSize ?? 1)
               ),
         height: presentationDimensions.height,
-        ...(effectivePrompts?.positivePrompt ? { positivePrompt: effectivePrompts.positivePrompt } : {}),
+        ...(effectivePrompts?.positivePrompt || editStep
+          ? { positivePrompt: effectivePrompts?.positivePrompt ?? editStep!.instruction }
+          : {}),
         width: presentationDimensions.width,
       },
       sourceId: route.sourceId,
@@ -4272,6 +4329,65 @@ const submitModelOnlyUpscale = (
     false,
     true
   );
+};
+
+/** Adds the step's nodes to the tree and queues its run; the tree is unchanged where either refuses. */
+const submitEditStep = (
+  project: Project,
+  defaults: ScopedDefaults,
+  backendSupportsCancellation: boolean,
+  runtime: InvocationRuntimeInputs,
+  route: ResolvedInvocationRoute,
+  plan: EditStepPlan | undefined,
+  prepend: boolean
+): { failure?: string; project: Project } => {
+  const tree = getEditableEditTree(project.editTree);
+
+  if (!isInvocationRouteValid(route) || !plan) {
+    return { project };
+  }
+
+  if (!tree || tree.rootNodeId !== plan.rootNodeId || getEditNode(tree, plan.parentId)?.status !== 'completed') {
+    return { failure: 'The edit history changed while the step was being prepared, so nothing was queued.', project };
+  }
+
+  let editTree: ProjectEditTree;
+
+  try {
+    editTree = addEditStep(tree, plan.parentId, plan.step);
+  } catch (error) {
+    return { failure: error instanceof Error ? error.message : String(error), project };
+  }
+
+  const widgetStates = getWidgetStatesSnapshot(project.widgetInstances);
+
+  widgetStates.instruct = { ...getWidgetState(project, 'instruct'), graphId: plan.compiled.graph.id };
+
+  const enqueued = enqueueCompiledSnapshot(
+    { ...project, editTree },
+    defaults,
+    route,
+    runtime,
+    { editStep: plan, graph: plan.compiled.graph, widgetStates },
+    backendSupportsCancellation,
+    undefined,
+    prepend,
+    // The shown route is Edit's already; submitting must not move it.
+    true
+  );
+
+  // The instruction goes with the step and the next one continues from the end of the shown branch, unless the user
+  // changed either, or the seed, while the step was being prepared.
+  return {
+    project: updateProjectWidgetValues(enqueued, 'instruct', (values) => ({
+      ...values,
+      ...(!plan.isRun && values.continueFromNodeId === plan.parentId ? { continueFromNodeId: null } : {}),
+      ...(!plan.isRun && typeof values.instruction === 'string' && values.instruction.trim() === plan.instruction
+        ? { instruction: '' }
+        : {}),
+      ...(plan.nextSeed !== null && values.seed === plan.seed ? { seed: plan.nextSeed } : {}),
+    })),
+  };
 };
 
 const submitInvocationSnapshot = (
@@ -4420,12 +4536,68 @@ const isSamePlacement = (left: Project, right: Project): boolean =>
     ]
   );
 
+const addEditFailureNotification = (state: WorkbenchState, projectId: string, message: string): WorkbenchState =>
+  addNotification(
+    state,
+    createNotification({
+      category: 'enqueue',
+      kind: 'error',
+      message,
+      projectId,
+      title: 'The edit history was not updated',
+      titleKey: 'widgets.instruct.historyNotUpdated',
+    })
+  );
+
+const applyEditSettle = (
+  state: WorkbenchState,
+  projectId: string,
+  settle: (project: Project) => { failure?: string; project: Project }
+): WorkbenchState => {
+  let failure: string | undefined;
+  const next = updateProjectById(state, projectId, (project) => {
+    const result = settle(project);
+
+    failure = result.failure;
+
+    return result.project;
+  });
+
+  return failure ? addEditFailureNotification(next, projectId, failure) : next;
+};
+
+/** Actions after which a queue item may have ended; the Edit tree settles its pending nodes from the new state. */
+const EDIT_SETTLING_ACTIONS: ReadonlySet<WorkbenchReducerAction['type']> = new Set([
+  'cancelQueueItem',
+  'cancelUnsubmittedQueueItems',
+  'markQueueItemBackendCancelled',
+  'reopenQueueItemForRetry',
+  'routeQueueItemResults',
+  'setQueueItemStatus',
+]);
+
+const settleEditTrees = (previous: WorkbenchState, next: WorkbenchState): WorkbenchState => {
+  const previousById = new Map(previous.projects.map((project) => [project.id, project]));
+
+  return next.projects.reduce(
+    (state, project) =>
+      previousById.get(project.id)?.queue === project.queue
+        ? state
+        : applyEditSettle(state, project.id, settleEditTreeFromQueue),
+    next
+  );
+};
+
 export const __workbenchReducerInternal = (
   state: WorkbenchState,
   action: WorkbenchReducerAction,
   context: WorkbenchReducerContext
 ): WorkbenchState => {
-  const next = reconcileCanvasStagingFollow(state, reduceWorkbenchAction(state, action, context));
+  const reduced = reduceWorkbenchAction(state, action, context);
+  const next = reconcileCanvasStagingFollow(
+    state,
+    EDIT_SETTLING_ACTIONS.has(action.type) ? settleEditTrees(state, reduced) : reduced
+  );
   const describeStep = RECORDED_LAYOUT_ACTIONS[action.type];
 
   if (!describeStep || next === state || next.projects === state.projects) {
@@ -5454,6 +5626,44 @@ const reduceWorkbenchAction = (
     }
     case 'submitResolvedInvocationSnapshot': {
       const target = state.projects.find((project) => project.id === action.projectId);
+
+      if (target && action.route.sourceId === 'instruct') {
+        let failure: string | undefined;
+        const next = withEnqueueNotification(
+          state,
+          updateProjectById(state, action.projectId, (project) => {
+            const result = submitEditStep(
+              project,
+              state.scopedDefaults,
+              action.backendSupportsCancellation,
+              action.runtime,
+              resolveInvocationRoute(
+                // The step validates against what it was built from, which is not always what the composer holds.
+                action.editStep
+                  ? withEditRun(project, {
+                      instruction: action.editStep.instruction,
+                      parentId: action.editStep.parentId,
+                      references: [],
+                    })
+                  : project,
+                'global',
+                action.route,
+                action.models
+              ),
+              action.editStep,
+              action.prepend === true
+            );
+
+            failure = result.failure;
+
+            return result.project;
+          }),
+          action.projectId
+        );
+
+        return failure ? addEditFailureNotification(next, action.projectId, failure) : next;
+      }
+
       const workflow =
         target && action.route.sourceId === 'workflow'
           ? action.workflowId
@@ -5540,6 +5750,38 @@ const reduceWorkbenchAction = (
         action.projectId
       );
     }
+    case 'startEditTree': {
+      let failure: string | undefined;
+      const next = updateProjectById(state, action.projectId, (project) => {
+        try {
+          return updateProjectWidgetValues(
+            { ...project, editTree: createEditTree(action.source, now()) },
+            'instruct',
+            (values) => ({ ...values, continueFromNodeId: null, references: [], sizeMode: 'auto' })
+          );
+        } catch (error) {
+          failure = error instanceof Error ? error.message : String(error);
+
+          return project;
+        }
+      });
+
+      return failure ? addEditFailureNotification(next, action.projectId, failure) : next;
+    }
+    case 'selectEditChild': {
+      return updateProjectById(state, action.projectId, (project) => {
+        const tree = getEditableEditTree(project.editTree);
+        const next = tree ? selectEditChild(tree, action.branchId, action.childId) : null;
+
+        return tree && next && next !== tree ? { ...project, editTree: next } : project;
+      });
+    }
+    case 'abandonEditStep': {
+      return applyEditSettle(state, action.projectId, (project) => abandonEditStep(project, action.stepId));
+    }
+    case 'settleStaleEditNodes': {
+      return applyEditSettle(state, action.projectId, (project) => settleStaleEditNodes(project, action.origin));
+    }
     case 'submitModelOnlyUpscale': {
       return withEnqueueNotification(
         state,
@@ -5571,7 +5813,10 @@ const reduceWorkbenchAction = (
               };
         });
 
-        return clampCanvasStagingSelection(nextProject, previousSelectedSlot);
+        return recordEditVariantItems(
+          clampCanvasStagingSelection(nextProject, previousSelectedSlot),
+          action.queueItemId
+        );
       });
     }
     case 'recordQueueItemSubmissionRetry': {
@@ -5756,13 +6001,16 @@ const reduceWorkbenchAction = (
       });
     }
     case 'reopenQueueItemForRetry': {
-      return updateProjectById(state, action.projectId, (project) => {
+      const reopenedState = updateProjectById(state, action.projectId, (project) => {
         const reopened = reopenQueueItemForRetry(project, action.queueItemId, action.retriedItems);
 
         return reopened === project
           ? project
           : clampCanvasStagingSelection(reopened, getSelectedCanvasStagingSlot(project));
       });
+      return applyEditSettle(reopenedState, action.projectId, (project) =>
+        reopenEditItemNodes(project, action.queueItemId, action.retriedItems, action.origin)
+      );
     }
     case 'stageRetriedCanvasResults': {
       return updateProjectById(state, action.projectId, (project) =>
@@ -6346,12 +6594,16 @@ const reduceWorkbenchAction = (
             queue: localProject.queue,
           }
         : normalizedServerProject;
-      return {
-        ...state,
-        projects: localProject
-          ? state.projects.map((project) => (project.id === action.projectId ? serverProject : project))
-          : [...state.projects, serverProject],
-      };
+      return applyEditSettle(
+        {
+          ...state,
+          projects: localProject
+            ? state.projects.map((project) => (project.id === action.projectId ? serverProject : project))
+            : [...state.projects, serverProject],
+        },
+        action.projectId,
+        settleEditTreeFromQueue
+      );
     }
     case 'retargetProject': {
       const liveProject = state.projects.find((candidate) => candidate.id === action.projectId);

@@ -91,6 +91,7 @@ const BUILT_IN_PRESET_DESCRIPTION_KEYS: Record<BuiltInLayoutPresetId, string> = 
   automate: 'topbar.presets.builtInDescriptions.automate',
   compose: 'topbar.presets.builtInDescriptions.compose',
   edit: 'topbar.presets.builtInDescriptions.edit',
+  instruct: 'topbar.presets.builtInDescriptions.instruct',
   video: 'topbar.presets.builtInDescriptions.video',
 };
 

@@ -223,7 +223,7 @@ for (const [engine, type] of Object.entries({ chromium, firefox, webkit })) {
             // Canvas and layer thumbnails must contain fixture colour, in all three engines.
             await page
               .getByRole('tablist', { exact: true, name: 'Layout preset' })
-              .getByRole('tab', { name: /^Edit(, unsaved changes)?$/ })
+              .getByRole('tab', { name: /^Canvas(, unsaved changes)?$/ })
               .click();
             await waitForRenderedMedia(page, { canvas: true });
             report.canvasPainting = 'passed';

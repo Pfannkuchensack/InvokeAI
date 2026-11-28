@@ -1,5 +1,6 @@
 import { NumberInput, VisuallyHidden } from '@chakra-ui/react';
 import { MIN_BATCH_COUNT } from '@features/generation/settings';
+import { MAX_INSTRUCT_VARIANTS } from '@features/instruct';
 import { Tooltip } from '@platform/ui/Tooltip';
 import { getProjectWidgetValues } from '@workbench/widgetState';
 import { useActiveProjectSelector, useWorkbenchCommands } from '@workbench/WorkbenchContext';
@@ -18,7 +19,10 @@ export const IterationsField = () => {
   const { batchCount, isFixed, sourceId } = useActiveProjectSelector(
     (project) => {
       const sourceId = project.invocation.sourceId;
-      const typeId = sourceId === 'upscale' || sourceId === 'video' || sourceId === 'workflow' ? sourceId : 'generate';
+      const typeId =
+        sourceId === 'upscale' || sourceId === 'video' || sourceId === 'workflow' || sourceId === 'instruct'
+          ? sourceId
+          : 'generate';
       // The same resolution the patch command writes through, so reader and writer agree on the instance.
       const values = getProjectWidgetValues(project, typeId);
 
@@ -39,7 +43,11 @@ export const IterationsField = () => {
         return;
       }
 
-      if (sourceId === 'upscale' || sourceId === 'video' || sourceId === 'workflow') {
+      if (sourceId === 'instruct') {
+        widgets.patchValues('instruct', {
+          variants: Math.min(MAX_INSTRUCT_VARIANTS, Math.max(1, Math.round(valueAsNumber))),
+        });
+      } else if (sourceId === 'upscale' || sourceId === 'video' || sourceId === 'workflow') {
         widgets.patchValues(sourceId, { batchCount: valueAsNumber });
       } else {
         generation.setBatchCount(valueAsNumber);
@@ -62,6 +70,7 @@ export const IterationsField = () => {
         flexShrink={0}
         opacity={isFixed ? 0.55 : undefined}
         readOnly={isFixed}
+        max={sourceId === 'instruct' ? MAX_INSTRUCT_VARIANTS : undefined}
         min={MIN_BATCH_COUNT}
         rounded="control"
         size="lg"

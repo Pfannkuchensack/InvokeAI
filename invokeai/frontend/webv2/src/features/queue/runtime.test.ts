@@ -95,6 +95,7 @@ const createTestBackend = (overrides: Partial<QueueBackendPort> = {}): QueueBack
 
 const createTestCommands = (overrides: Partial<QueueHistoryCommands> = {}): QueueHistoryCommands => ({
   markBackendCancelled: vi.fn(),
+  markProjectQueueLoaded: vi.fn(),
   noteFirstProgressFrame: vi.fn(),
   markBackendSubmitted: vi.fn(),
   recordSubmissionRetry: vi.fn(),
@@ -362,6 +363,7 @@ describe('queue runtime', () => {
     };
     const commands: QueueHistoryCommands = {
       markBackendCancelled: vi.fn(),
+      markProjectQueueLoaded: vi.fn(),
       noteFirstProgressFrame: vi.fn(),
       markBackendSubmitted: ({ backendBatchId, backendItemIds }) => {
         queueItem.backendBatchId = backendBatchId;
@@ -1441,6 +1443,80 @@ describe('queue runtime', () => {
     runtime.dispose();
   });
 
+  describe('announcing that the restored runs of a project', () => {
+    const start = async (listForProject: ReturnType<typeof vi.fn>) => {
+      const markProjectQueueLoaded = vi.fn();
+      const restoreFromJournal = vi.fn();
+      const project = { id: 'project-1', queue: { items: [] as QueueItem[] } };
+      const runtime = createQueueRuntime({
+        ...runtimeServices,
+        backend: createTestBackend(),
+        history: {
+          commands: createTestCommands({ markProjectQueueLoaded, restoreFromJournal }),
+          listStagedResults: () => [],
+          getSnapshot: () => ({ connectionStatus: 'connected', isHydrated: true, projects: [project] }),
+          subscribe: () => () => undefined,
+        },
+        journal: createTestJournal({ listForProject: listForProject as never }),
+        locks: createTestLocks(vi.fn().mockResolvedValue({ kind: 'contended' })),
+      });
+
+      runtime.start();
+      await vi.waitFor(() => expect(listForProject).toHaveBeenCalled());
+      await Promise.resolve();
+
+      return { markProjectQueueLoaded, restoreFromJournal, runtime };
+    };
+
+    it('announces it after the journal rows are restored', async () => {
+      const order: string[] = [];
+      const { markProjectQueueLoaded, restoreFromJournal, runtime } = await start(
+        vi.fn().mockResolvedValue({ entries: [], kind: 'available' })
+      );
+
+      await vi.waitFor(() => expect(markProjectQueueLoaded).toHaveBeenCalledWith({ projectId: 'project-1' }));
+      expect(restoreFromJournal).toHaveBeenCalledTimes(1);
+      expect(restoreFromJournal.mock.invocationCallOrder[0]).toBeLessThan(
+        markProjectQueueLoaded.mock.invocationCallOrder[0]!
+      );
+      expect(order).toEqual([]);
+      runtime.dispose();
+    });
+
+    it('does not announce it when the journal could not be opened at all', async () => {
+      const markProjectQueueLoaded = vi.fn();
+      const project = { id: 'project-1', queue: { items: [] as QueueItem[] } };
+      const runtime = createQueueRuntime({
+        ...runtimeServices,
+        backend: createTestBackend(),
+        history: {
+          commands: createTestCommands({ markProjectQueueLoaded }),
+          listStagedResults: () => [],
+          getSnapshot: () => ({ connectionStatus: 'connected', isHydrated: true, projects: [project] }),
+          subscribe: () => () => undefined,
+        },
+        locks: createTestLocks(vi.fn().mockResolvedValue({ kind: 'contended' })),
+      });
+
+      runtime.start();
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 20);
+      });
+      expect(markProjectQueueLoaded).not.toHaveBeenCalled();
+      runtime.dispose();
+    });
+
+    it('does not announce it when the journal cannot be read, since the runs are then unknown', async () => {
+      const { markProjectQueueLoaded, runtime } = await start(vi.fn().mockResolvedValue({ kind: 'unavailable' }));
+
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 20);
+      });
+      expect(markProjectQueueLoaded).not.toHaveBeenCalled();
+      runtime.dispose();
+    });
+  });
+
   it('settles the journal and releases ownership after a restored run completes', async () => {
     const queueItem = createPendingQueueItem();
     const project = { id: 'project-1', queue: { items: [queueItem] } };
@@ -1644,6 +1720,7 @@ describe('queue runtime video board routing', () => {
     };
     const commands: QueueHistoryCommands = {
       markBackendCancelled: vi.fn(),
+      markProjectQueueLoaded: vi.fn(),
       noteFirstProgressFrame: vi.fn(),
       markBackendSubmitted: ({ backendBatchId, backendItemIds }) => {
         queueItem.backendBatchId = backendBatchId;
