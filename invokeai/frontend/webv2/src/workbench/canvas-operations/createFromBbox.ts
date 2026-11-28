@@ -23,7 +23,8 @@ export type CreateFromBboxLayerDestination = Extract<
   'raster' | 'control' | 'regional-reference'
 >;
 
-export type CreateFromBboxDestination = 'global-reference' | CreateFromBboxLayerDestination;
+/** The two upload-only destinations hand the image to a panel (Generate's references, Edit's history). */
+export type CreateFromBboxDestination = 'edit' | 'global-reference' | CreateFromBboxLayerDestination;
 
 export type CreateFromBboxResult =
   | { status: 'created'; destination: CreateFromBboxLayerDestination; layerIds: string[] }
@@ -39,7 +40,7 @@ type CreateFromBboxEngine = CanvasCompositeExportEngine & {
 };
 
 /**
- * Upload visible raster content inside the bbox for a global reference or layer at the bbox origin. The shared import
+ * Upload visible raster content inside the bbox for a global reference, an Edit source or a layer at the bbox origin. The shared import
  * pipeline rechecks document identity after export/upload.
  */
 export const createFromBbox = async (options: {
@@ -80,7 +81,7 @@ export const createFromBbox = async (options: {
     });
 
     assertAccountScopeCurrent(owner);
-    if (destination === 'global-reference') {
+    if (destination === 'global-reference' || destination === 'edit') {
       return { image: uploaded, status: 'uploaded' };
     }
 

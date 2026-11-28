@@ -160,6 +160,16 @@ export const prepareEditStep = async ({
     throw new Error('The image to continue from is not available.');
   }
 
+  // An image that is gone or not shown to this user is refused here (the lookup cannot tell which); a lookup that fails
+  // is not a refusal, since the run itself would fail on it anyway.
+  const found = await import('@features/gallery')
+    .then(({ galleryImages }) => galleryImages.resolveMany([parent.imageName!]))
+    .catch(() => null);
+
+  if (found && !found.some((entry) => entry.imageName === parent.imageName)) {
+    throw new Error('The image to continue from is not available.');
+  }
+
   const { compileEditGraph, fitToOptimalArea } = await import('@features/generation/editGraph');
   const model: MainModelConfig = values.model;
   const size = resolveEditOutputSize({

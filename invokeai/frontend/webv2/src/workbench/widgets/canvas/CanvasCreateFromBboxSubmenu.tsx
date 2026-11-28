@@ -13,6 +13,7 @@ const CREATE_FROM_BBOX_ITEMS: readonly { destination: CreateFromBboxDestination;
   { destination: 'regional-reference', labelKey: 'widgets.canvas.contextMenu.newRegionalReferenceImage' },
   { destination: 'control', labelKey: 'widgets.canvas.contextMenu.newControlLayer' },
   { destination: 'raster', labelKey: 'widgets.canvas.contextMenu.newRasterLayer' },
+  { destination: 'edit', labelKey: 'widgets.canvas.contextMenu.newEditSourceImage' },
 ];
 
 /** What a frame snapshot can become, in the order every host lists them. */

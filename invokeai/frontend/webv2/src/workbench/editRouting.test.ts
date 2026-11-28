@@ -13,7 +13,7 @@ import { getBrowserId } from './browserId';
 import { prepareEditStep } from './editSubmission';
 import { settleStaleEditNodes } from './editTreeRouting';
 import { captureInvocationRuntimeInputs } from './invocationPreparation';
-import { getEditableEditTree, getEditNode } from './projectEditTree';
+import { getEditableEditTree, getEditNode, readStoredEditTree } from './projectEditTree';
 import { getProjectWidgetValues } from './widgetState';
 import { createInitialWorkbenchState, workbenchReducer } from './workbenchState.testing';
 
@@ -457,6 +457,129 @@ describe('stale pending nodes', () => {
       { imageName: 'a.png', status: 'completed' },
       { imageName: 'b.png', status: 'completed' },
     ]);
+  });
+});
+
+describe('Deleting images an Edit history uses', () => {
+  const ref = { height: 64, image_name: 'ref.png', width: 64 };
+  const keep = { height: 64, image_name: 'keep.png', width: 64 };
+
+  /** Two steps: source > a, b > two children of a; the composer holds two extra references. */
+  const createHistory = async () => {
+    let state = createEditState();
+    const projectId = state.activeProjectId;
+    const patch = (values: Record<string, unknown>) =>
+      (state = workbenchReducer(state, { projectId, type: 'patchWidgetValues', values, widgetId: 'instruct' }));
+    const complete = (images: string[]) => {
+      const item = getActive(state).queue.items[0]!;
+
+      state = workbenchReducer(state, {
+        images: images.map((name) => image(name, item.id)),
+        projectId,
+        queueItemId: item.id,
+        type: 'routeQueueItemResults',
+      });
+    };
+
+    patch({ references: [ref, keep] });
+    state = (await submitStep(state)).state;
+    complete(['a.png', 'b.png']);
+    patch({ instruction: 'and add birds' });
+    state = (await submitStep(state)).state;
+
+    return state;
+  };
+
+  const remove = (state: WorkbenchState, ...names: string[]) =>
+    workbenchReducer(state, { itemKeys: names.map((name) => `image:${name}` as const), type: 'removeGalleryItems' });
+
+  it('keeps a deleted result as a placeholder with its instruction, settings and children', async () => {
+    const before = await createHistory();
+    const treeBefore = getTree(before);
+    const a = treeBefore.nodes.find((node) => node.imageName === 'a.png')!;
+    const after = getTree(remove(before, 'a.png'));
+    const placeholder = getEditNode(after, a.id)!;
+
+    expect(placeholder).toMatchObject({
+      imageName: null,
+      instruction: a.instruction,
+      parentId: a.parentId,
+      settings: a.settings,
+      status: 'deleted',
+    });
+    expect(after.nodes).toHaveLength(treeBefore.nodes.length);
+    expect(after.nodes.filter((node) => node.parentId === a.id)).toEqual(
+      treeBefore.nodes.filter((node) => node.parentId === a.id)
+    );
+    expect(getEditNode(after, treeBefore.nodes.find((node) => node.imageName === 'b.png')!.id)?.status).toBe(
+      'completed'
+    );
+  });
+
+  it('marks a deleted source and keeps the names of deleted step references', async () => {
+    const before = await createHistory();
+    const after = getTree(remove(before, 'source.png', 'ref.png'));
+
+    expect(getEditNode(after, after.rootNodeId)).toMatchObject({ imageName: null, status: 'deleted' });
+    expect(after.nodes.flatMap((node) => node.referenceImages.map((reference) => reference.imageName))).toContain(
+      'ref.png'
+    );
+  });
+
+  it('removes deleted images from the composer references only', async () => {
+    const after = remove(await createHistory(), 'ref.png');
+
+    expect(getProjectWidgetValues(getActive(after), 'instruct').references).toEqual([keep]);
+  });
+
+  it('waits for the confirmed removal: an optimistic one that is rolled back leaves the history and references intact', async () => {
+    const before = await createHistory();
+    const optimistic = workbenchReducer(before, {
+      itemKeys: ['image:a.png', 'image:ref.png', 'image:source.png'],
+      optimistic: true,
+      type: 'removeGalleryItems',
+    });
+
+    expect(getActive(optimistic).editTree).toBe(getActive(before).editTree);
+    expect(getProjectWidgetValues(getActive(optimistic), 'instruct').references).toEqual([ref, keep]);
+
+    const confirmed = workbenchReducer(optimistic, {
+      itemKeys: ['image:a.png'],
+      type: 'removeGalleryItems',
+    });
+
+    expect(getTree(confirmed).nodes.filter((node) => node.status === 'deleted')).toHaveLength(1);
+  });
+
+  it('tells which reference was removed when later ones are renumbered, and only then', async () => {
+    const messages = (state: WorkbenchState) =>
+      state.notifications.filter((notice) => notice.titleKey === 'widgets.instruct.referencesChanged');
+
+    expect(messages(remove(await createHistory(), 'ref.png'))).toMatchObject([
+      { message: 'Image 2 was removed from the references; check your instruction.' },
+    ]);
+    expect(messages(remove(await createHistory(), 'keep.png'))).toEqual([]);
+  });
+
+  it('refuses to start over an edit history this build cannot read', () => {
+    const state = createEditState();
+    const unreadable = readStoredEditTree({ nodes: 'newer format', rootNodeId: 'x' });
+    const held = {
+      ...state,
+      projects: state.projects.map((project) => ({ ...project, editTree: unreadable })),
+    } as WorkbenchState;
+    const after = workbenchReducer(held, { projectId: held.activeProjectId, source: SOURCE, type: 'startEditTree' });
+
+    expect(getActive(after).editTree).toBe(unreadable);
+    expect(after.notifications.at(-1)).toMatchObject({ kind: 'error', titleKey: 'widgets.instruct.historyNotUpdated' });
+  });
+
+  it('leaves the history and the references alone when none of the images is theirs', async () => {
+    const before = await createHistory();
+    const after = remove(before, 'unrelated.png');
+
+    expect(getActive(after).editTree).toBe(getActive(before).editTree);
+    expect(getActive(after).widgetInstances).toBe(getActive(before).widgetInstances);
   });
 });
 

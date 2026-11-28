@@ -31,6 +31,10 @@ export interface InstructUiActions {
 
 /** Workbench supplies this port: the edit tree, the queue and the project belong to it, and features cannot import it. */
 export interface InstructUiAdapter extends InstructUiActions {
+  /** The project holds an edit history this version cannot read; none can be started over it. */
+  hasUnreadableHistory: boolean;
+  /** Images the history names that the gallery no longer has, as far as they have been looked up. */
+  missingImages: ReadonlySet<string>;
   /** How the paste shortcut reads on this platform. */
   pasteShortcut: string;
   projectId: string;

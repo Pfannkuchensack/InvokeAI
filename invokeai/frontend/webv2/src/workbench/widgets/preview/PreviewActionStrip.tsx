@@ -110,7 +110,7 @@ export const PreviewActionStrip = ({
   if (density === 'compact') {
     return (
       <HStack flexShrink={0} gap="0.5">
-        {image ? <EditMenu actions={actions} image={image} isIconOnly /> : null}
+        {image ? <ContinueMenu actions={actions} image={image} isIconOnly /> : null}
         <UseMenu actions={actions} isIconOnly item={item} />
         {starButton}
         {menuButton}
@@ -130,7 +130,7 @@ export const PreviewActionStrip = ({
   return (
     <HStack flexShrink={0} gap="0.5">
       {/* Lead with the labelled next steps; videos have no Edit or compare, matching context-menu eligibility. */}
-      {image ? <EditMenu actions={actions} image={image} /> : null}
+      {image ? <ContinueMenu actions={actions} image={image} /> : null}
       <UseMenu actions={actions} item={item} />
       {image ? (
         // A fixed name with the state in aria-pressed, as the routing lock is: pressed, it waits for a second image.
@@ -206,10 +206,10 @@ const ItemMenuTrigger = ({
   </Button>
 );
 
-/** Every way to continue working with the image, Edit on Canvas first. */
-const EditMenu = ({ actions, image, isIconOnly = false }: ItemMenuProps) => {
+/** Every way to continue working with the image, Edit on Canvas first. Named for continuing: Edit is a workspace too. */
+const ContinueMenu = ({ actions, image, isIconOnly = false }: ItemMenuProps) => {
   const { t } = useTranslation();
-  const label = t('widgets.preview.editThisImage');
+  const label = t('widgets.preview.continueWithImage');
   const ids = useTooltipTriggerIds();
   const { handleOpenChange, menuItem: menuImage } = useHeldWhileOpen(image);
   const images = useMemo(() => [menuImage], [menuImage]);
@@ -221,8 +221,8 @@ const EditMenu = ({ actions, image, isIconOnly = false }: ItemMenuProps) => {
           <ItemMenuTrigger
             icon={PencilIcon}
             isIconOnly={isIconOnly}
-            label={isIconOnly ? label : t('common.edit')}
-            text={t('common.edit')}
+            label={isIconOnly ? label : t('widgets.preview.continue')}
+            text={t('widgets.preview.continue')}
           />
         </Menu.Trigger>
       </Tooltip>

@@ -204,7 +204,7 @@ describe('collectMediaUsage', () => {
     ]);
   });
 
-  it('reports the images of an Edit tree: its nodes and its references', () => {
+  it('reports the images of an Edit tree under Edit: its nodes, its references and the composer references', () => {
     const doc = project({
       fields: {
         editTree: {
@@ -216,11 +216,23 @@ describe('collectMediaUsage', () => {
           selection: {},
         },
       },
+      widgets: { instruct: { references: [{ height: 64, image_name: 'composer-ref.png', width: 64 }] } },
     });
 
     expect(
-      collectMediaUsage(doc, [image('source.png'), image('edited.png'), image('ref.png'), image('other.png')])
-    ).toEqual([{ refs: [image('source.png'), image('edited.png'), image('ref.png')], surface: 'otherProjectState' }]);
+      collectMediaUsage(doc, [
+        image('source.png'),
+        image('edited.png'),
+        image('ref.png'),
+        image('composer-ref.png'),
+        image('other.png'),
+      ])
+    ).toEqual([
+      {
+        refs: [image('source.png'), image('edited.png'), image('ref.png'), image('composer-ref.png')],
+        surface: 'edit',
+      },
+    ]);
   });
 
   it('reports the images inside an Edit tree this build cannot read', () => {

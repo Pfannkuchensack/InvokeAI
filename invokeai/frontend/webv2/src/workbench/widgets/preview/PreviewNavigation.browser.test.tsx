@@ -2064,6 +2064,7 @@ const createItemMenuActions = (overrides: Partial<ImageActions>): ImageActions =
   moveImagesToBoard: vi.fn(() => Promise.resolve()),
   openItemInNewTab: vi.fn(),
   openItemInPreview: vi.fn(),
+  openImageInEdit: vi.fn(),
   openImageInPreview: vi.fn(),
   recallImageData: vi.fn(() => Promise.resolve()),
   loadVideoWorkflow: vi.fn(() => Promise.resolve()),

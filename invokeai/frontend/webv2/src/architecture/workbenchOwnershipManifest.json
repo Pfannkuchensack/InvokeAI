@@ -102,6 +102,7 @@
     "controlModelResolution.ts": "workbench",
     "controlTypes.ts": "workbench",
     "deferredResource.ts": "workbench",
+    "editEntry.ts": "workbench",
     "editSubmission.ts": "workbench",
     "editTreeRouting.ts": "workbench",
     "floatingWindows.ts": "workbench",

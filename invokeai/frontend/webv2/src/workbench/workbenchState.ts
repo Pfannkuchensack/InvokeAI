@@ -141,6 +141,7 @@ import {
   createEditTree,
   getEditableEditTree,
   getEditNode,
+  markEditImageDeleted,
   readStoredEditTree,
   selectEditChild,
 } from './projectEditTree';
@@ -189,6 +190,7 @@ import {
   sanitizeSampleSeed,
   syncGenerateWidgetValuesWithModels,
 } from '@features/generation/settings';
+import { clearDeletedInstructReferences } from '@features/instruct';
 import { getQueueSourceResultSelection, MAX_QUEUE_BATCH_ITEMS } from '@features/queue';
 import {
   getAutoSwitchFollowedLive,
@@ -593,6 +595,12 @@ type WorkbenchReducerAction =
       itemKeys: GalleryItemKey[];
       /** The caller selects a next image in `projectId` right after, so that project's comparison stays open. */
       keepComparisonForSuccessor?: boolean;
+      /**
+       * The removal precedes the server's answer and may be rolled back. The Edit history's placeholders and the
+       * composer's references live in shared project content that rollback does not restore, so they wait for the
+       * confirmed removal.
+       */
+      optimistic?: boolean;
       projectId?: string;
     }
   | {
@@ -3510,10 +3518,24 @@ const getLocallyKnownGalleryItemsOnBoard = (
   return items;
 };
 
+/** The "Image N" number of the first removed composer reference that later ones follow; null when none renumbers. */
+const getFirstRenumberedInstructReference = (references: unknown, removed: ReadonlySet<string>): number | null => {
+  if (!Array.isArray(references)) {
+    return null;
+  }
+
+  const names = references.map((entry) => (entry as { image_name?: unknown } | null)?.image_name);
+  const first = names.findIndex((name) => typeof name === 'string' && removed.has(name));
+  const hasLaterKept = names.some((name, index) => index > first && !(typeof name === 'string' && removed.has(name)));
+
+  return first >= 0 && hasLaterKept ? first + 2 : null;
+};
+
 const removeGalleryItemsFromAllProjects = (
   state: WorkbenchState,
   removedItemKeys: ReadonlySet<GalleryItemKey>,
-  successorProjectId: string | null = null
+  successorProjectId: string | null = null,
+  { edit = true }: { edit?: boolean } = {}
 ): WorkbenchState => {
   if (removedItemKeys.size === 0) {
     return state;
@@ -3534,6 +3556,7 @@ const removeGalleryItemsFromAllProjects = (
     })
   );
   let didChange = false;
+  const renumberedReferences: { number: number; projectId: string }[] = [];
   const projects = state.projects.map((project) => {
     const keepComparisonForSuccessor = project.id === successorProjectId;
     const withoutGalleryItems = updateProjectWidgetValues(project, 'gallery', (values) => {
@@ -3593,11 +3616,55 @@ const removeGalleryItemsFromAllProjects = (
       clearDeletedVideoMedia(rawValues, removedImageNames, removedVideoNames)
     );
 
-    didChange ||= withoutVideoMedia !== project;
-    return withoutVideoMedia;
+    // A node whose image is gone stays as a placeholder, with its instruction, settings and children; a reference
+    // image of a step keeps its name (shown as missing), but the composer's extra references drop it.
+    const withoutEditReferences = edit
+      ? updateProjectWidgetValues(withoutVideoMedia, 'instruct', (rawValues) =>
+          clearDeletedInstructReferences(rawValues, removedImageNames)
+        )
+      : withoutVideoMedia;
+    const renumberedFrom = edit
+      ? getFirstRenumberedInstructReference(
+          getProjectWidgetValues(withoutVideoMedia, 'instruct').references,
+          removedImageNames
+        )
+      : null;
+
+    if (renumberedFrom !== null) {
+      renumberedReferences.push({ number: renumberedFrom, projectId: project.id });
+    }
+    const editTree = edit ? getEditableEditTree(withoutEditReferences.editTree) : null;
+    const markedTree = editTree
+      ? [...removedImageNames].reduce((tree, name) => markEditImageDeleted(tree, name), editTree)
+      : editTree;
+    const withEditPlaceholders =
+      markedTree && markedTree !== editTree
+        ? { ...withoutEditReferences, editTree: markedTree }
+        : withoutEditReferences;
+
+    didChange ||= withEditPlaceholders !== project;
+    return withEditPlaceholders;
   });
 
-  return didChange ? { ...state, projects } : state;
+  const next = didChange ? { ...state, projects } : state;
+
+  // Deleting a reference renumbers those after it ("Image 3" becomes "Image 2"), which an instruction may name.
+  return renumberedReferences.reduce(
+    (current, { number, projectId }) =>
+      addNotification(
+        current,
+        createNotification({
+          kind: 'info',
+          message: `Image ${number} was removed from the references; check your instruction.`,
+          messageKey: 'widgets.instruct.referenceRemoved',
+          messageValues: { number },
+          projectId,
+          title: 'Edit references changed',
+          titleKey: 'widgets.instruct.referencesChanged',
+        })
+      ),
+    next
+  );
 };
 
 /** Its own inbox is left out: it exists only with the project and goes with it. */
@@ -4536,13 +4603,19 @@ const isSamePlacement = (left: Project, right: Project): boolean =>
     ]
   );
 
-const addEditFailureNotification = (state: WorkbenchState, projectId: string, message: string): WorkbenchState =>
+const addEditFailureNotification = (
+  state: WorkbenchState,
+  projectId: string,
+  message: string,
+  messageKey?: string
+): WorkbenchState =>
   addNotification(
     state,
     createNotification({
       category: 'enqueue',
       kind: 'error',
       message,
+      ...(messageKey ? { messageKey } : {}),
       projectId,
       title: 'The edit history was not updated',
       titleKey: 'widgets.instruct.historyNotUpdated',
@@ -5752,7 +5825,16 @@ const reduceWorkbenchAction = (
     }
     case 'startEditTree': {
       let failure: string | undefined;
+      let failureKey: string | undefined;
       const next = updateProjectById(state, action.projectId, (project) => {
+        // A history this build cannot read is a newer build's data (projects/README.md): never replaced, from any entry.
+        if (project.editTree && !getEditableEditTree(project.editTree)) {
+          failure = 'This project has an edit history this version cannot read, so it was not replaced.';
+          failureKey = 'widgets.instruct.historyUnreadableNotReplaced';
+
+          return project;
+        }
+
         try {
           return updateProjectWidgetValues(
             { ...project, editTree: createEditTree(action.source, now()) },
@@ -5766,7 +5848,7 @@ const reduceWorkbenchAction = (
         }
       });
 
-      return failure ? addEditFailureNotification(next, action.projectId, failure) : next;
+      return failure ? addEditFailureNotification(next, action.projectId, failure, failureKey) : next;
     }
     case 'selectEditChild': {
       return updateProjectById(state, action.projectId, (project) => {
@@ -6373,7 +6455,8 @@ const reduceWorkbenchAction = (
       return removeGalleryItemsFromAllProjects(
         state,
         new Set(action.itemKeys),
-        action.keepComparisonForSuccessor ? (action.projectId ?? state.activeProjectId) : null
+        action.keepComparisonForSuccessor ? (action.projectId ?? state.activeProjectId) : null,
+        { edit: action.optimistic !== true }
       );
     }
     case 'reconcileDeletedGalleryBoard': {

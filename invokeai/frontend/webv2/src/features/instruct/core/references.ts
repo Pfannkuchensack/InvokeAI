@@ -31,3 +31,24 @@ export const addInstructReferences = (
 
 export const removeInstructReference = (references: readonly ImageWithDims[], imageName: string): ImageWithDims[] =>
   references.filter((reference) => reference.image_name !== imageName);
+
+/** Drops deleted images from stored values (raw: a malformed entry is none of its business); same object when none. */
+export const clearDeletedInstructReferences = <T extends { references?: unknown }>(
+  values: T,
+  removedImageNames: ReadonlySet<string>
+): T => {
+  if (!Array.isArray(values.references)) {
+    return values;
+  }
+
+  const kept = values.references.filter(
+    (entry: unknown) =>
+      !(
+        typeof entry === 'object' &&
+        entry !== null &&
+        removedImageNames.has((entry as { image_name?: string }).image_name as string)
+      )
+  );
+
+  return kept.length === values.references.length ? values : { ...values, references: kept };
+};

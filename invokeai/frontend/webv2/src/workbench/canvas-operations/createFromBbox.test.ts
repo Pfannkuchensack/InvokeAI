@@ -227,6 +227,22 @@ describe('createFromBbox', () => {
     expect(harness.commitStructural).not.toHaveBeenCalled();
   });
 
+  it('returns the upload for the edit destination as it does for a global reference', async () => {
+    const harness = createHarness();
+
+    await expect(harness.run('edit')).resolves.toEqual({
+      image: { height: bbox.height, imageName: uploadedName, width: bbox.width },
+      status: 'uploaded',
+    });
+
+    expect(harness.uploadImage).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ isIntermediate: false })
+    );
+    expect(harness.resolveImages).not.toHaveBeenCalled();
+    expect(harness.commitStructural).not.toHaveBeenCalled();
+  });
+
   it.each(['empty', 'stale', 'not-ready', 'over-budget'] as const)('returns %s without uploading', async (status) => {
     const harness = createHarness({ exportResult: { status } });
 

@@ -39,9 +39,11 @@ import {
 import { ApiError } from '@platform/transport/http';
 
 import type { CanvasRecallTarget } from './canvasRecall';
+import type { EditRecallInput, EditRecallOutcome } from './editRecall';
 
 import {
   buildImageRecallSettings,
+  getEditRecallSourceName,
   getImageRecallMessage,
   readMetadataReferenceImages,
   getImageRecallTitle,
@@ -324,6 +326,11 @@ export const claimCanvasRecall = (owner: AccountScope): (() => void) | null => {
 interface ImageRecallInput {
   commands: Pick<WorkbenchCommands, 'generation' | 'notifications'>;
   canvasTarget?: CanvasRecallTarget;
+  /**
+   * Takes a recall of an Edit workspace image (Recall All and Remix) into Edit; `recalled` or `stale` (the project was
+   * left meanwhile) send nothing to Generate. Absent or `declined` recalls into Generate as for any image.
+   */
+  editRecall?: (input: EditRecallInput) => Promise<EditRecallOutcome>;
   /** Re-read after every await: the commit writes the whole Generate record, so a snapshot would revert newer edits. */
   getGenerateValues: () => Record<string, unknown>;
   image: GalleryImage;
@@ -340,6 +347,7 @@ interface ImageRecallInput {
 export const executeImageRecall = async ({
   commands,
   canvasTarget,
+  editRecall,
   getGenerateValues,
   image,
   isCanvasFrame,
@@ -400,11 +408,13 @@ export const executeImageRecall = async ({
       kind === 'dimensions' ? null : await fetchGalleryImageMetadata(queryClient, owner, image.imageName);
     // Checked against the record, not the built list, so it precedes the snapshot.
     const referenceRecord = kind === 'all' || kind === 'remix' ? readMetadataReferenceImages(metadata) : null;
+    const editSourceName = editRecall ? getEditRecallSourceName(metadata) : null;
     let referenceAssets = new Map<string, GalleryImage>();
     let referenceLookupFailed = false;
     try {
       referenceAssets = await resolveReferenceImages(
-        referenceRecord?.names ?? [],
+        // The source of an Edit step is looked up with the references, so deleted and unknown are told apart.
+        [...(referenceRecord?.names ?? []), ...(recallsModel && editSourceName ? [editSourceName] : [])],
         owner.signal,
         () => isAccountScopeCurrent(owner) && (!canvasTarget || Boolean(canvasTarget.getProject()))
       );
@@ -588,6 +598,62 @@ export const executeImageRecall = async ({
       skippedRefiner ? getSkippedRefinerMessage(skippedRefiner, t) : null,
     ].filter((message) => message !== null);
     const skipMessage = skipMessages.length > 0 ? skipMessages.join(' ') : null;
+
+    // Only a record whose model resolved goes to Edit: otherwise the settings would be the Generate panel's own.
+    if (editRecall && editSourceName && (kind === 'all' || kind === 'remix') && result.fields.includes('model')) {
+      const source = referenceAssets.get(editSourceName);
+      const editOutcome = await editRecall({
+        kind,
+        source: source ? { height: source.height, image_name: source.imageName, width: source.width } : null,
+        sourceName: editSourceName,
+        // The Generate panel's own references are not the step's: only what the record names, and still exists.
+        values: {
+          ...result.values,
+          referenceImages: result.fields.includes('referenceImages')
+            ? keepAvailableReferenceImages(result.values.referenceImages, availableReferenceNames)
+            : [],
+        },
+      });
+
+      assertAccountScopeCurrent(owner);
+
+      if (editOutcome === 'stale') {
+        return false;
+      }
+
+      if (editOutcome === 'recalled') {
+        commands.notifications.add({
+          kind: 'success',
+          message: t('widgets.gallery.itemActions.recall.editRecalled'),
+          title: getImageRecallTitle(kind, t),
+        });
+        // One notice for what was only partly recalled. A failed lookup is not a deleted source, so it is told apart; it
+        // also is why references are missing, so the generic reference notice is left out then.
+        const partial = [
+          source
+            ? null
+            : t(
+                referenceLookupFailed
+                  ? 'widgets.gallery.itemActions.recall.editSourceLookupFailed'
+                  : 'widgets.gallery.itemActions.recall.editSourceMissing'
+              ),
+          ...skipMessages.filter(
+            (message) =>
+              !(referenceLookupFailed && message === t('widgets.gallery.itemActions.recall.referenceImagesPartial'))
+          ),
+        ].filter((message) => message !== null);
+
+        if (partial.length > 0) {
+          commands.notifications.add({
+            kind: 'info',
+            message: partial.join(' '),
+            title: t('widgets.gallery.itemActions.recall.partiallyRecalled'),
+          });
+        }
+
+        return true;
+      }
+    }
 
     if (result.fields.length === 0 && !canvasApplied) {
       commands.notifications.add({

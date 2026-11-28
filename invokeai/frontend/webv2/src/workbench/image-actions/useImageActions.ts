@@ -69,6 +69,7 @@ import {
   sendGalleryImageAsControl,
   type GalleryCanvasImportDestination,
 } from '@workbench/canvas-operations/api';
+import { hasUnreadableEditHistory, openImageInEdit } from '@workbench/editEntry';
 import { getProjectSyncSnapshot } from '@workbench/projects/syncStore';
 import { useWorkbenchPreferenceSelector } from '@workbench/settings/store';
 import { useNotify } from '@workbench/useNotify';
@@ -85,6 +86,7 @@ import type { VideoRecallKind } from './videoRecall';
 
 import { appendReferenceImage } from './appendReferenceImage';
 import { recordCanvasImportError } from './canvasImportError';
+import { recallIntoEdit } from './editRecall';
 import { executeImageRecall, executeLoadMediaWorkflow, getCurrentGenerateValues } from './executeImageRecall';
 import {
   appendReferenceVideo,
@@ -128,6 +130,8 @@ export interface ImageActions extends GalleryItemActions {
   loadImageWorkflow: (image: GalleryImage) => Promise<void>;
   loadVideoWorkflow: (item: GalleryVideoItem) => Promise<void>;
   moveImagesToBoard: (imageNames: string[], boardId: string) => Promise<void>;
+  /** Starts the Edit history from the image (or jumps to it), and shows the Edit preset. */
+  openImageInEdit: (image: GalleryImage) => void;
   openImageInPreview: (image: GalleryImage) => void;
   recallImageData: (image: GalleryImage, kind: ImageRecallKind) => Promise<void>;
   recallVideoData: (item: GalleryVideoItem, kind: VideoRecallKind) => Promise<void>;
@@ -303,6 +307,12 @@ export const useImageActions = ({
         namespace: 'gallery',
         projectId,
       });
+    const getEditTarget = () => ({
+      commands,
+      getProject: queries.getProject,
+      isActiveProject: queries.isActiveProject,
+      projectId: projectId ?? queries.getSnapshot().activeProject.id,
+    });
     const recordSuccess = (title: string, message?: string) => notifications.add({ kind: 'success', message, title });
     const getBoardName = (boardId: string) => {
       const board = boards.find((board) => board.id === boardId);
@@ -336,7 +346,7 @@ export const useImageActions = ({
     const applyGalleryItemRemoval = (itemKeys: GalleryItemKey[]): GalleryWidgetKeySnapshotEntry[] => {
       const before = captureGalleryWidgetKeyValues(queries.getSnapshot().projects);
 
-      gallery.removeItems(itemKeys, { keepComparisonForSuccessor: true, projectId });
+      gallery.removeItems(itemKeys, { keepComparisonForSuccessor: true, optimistic: true, projectId });
 
       return diffGalleryWidgetKeyValues(before, queries.getSnapshot().projects);
     };
@@ -1270,8 +1280,16 @@ export const useImageActions = ({
       },
       recallImageData: async (image, kind) => {
         const owner = captureAccountScope();
+        let isRecalledIntoEdit = false;
         const didRecall = await executeImageRecall({
           commands,
+          editRecall: async (input) => {
+            const outcome = await recallIntoEdit(getEditTarget(), input);
+
+            isRecalledIntoEdit = outcome !== 'declined';
+
+            return outcome;
+          },
           canvasTarget: projectId
             ? {
                 commands,
@@ -1289,9 +1307,25 @@ export const useImageActions = ({
           t,
         });
 
-        if (isAccountScopeCurrent(owner) && didRecall && (!projectId || queries.isActiveProject(projectId))) {
+        if (
+          isAccountScopeCurrent(owner) &&
+          didRecall &&
+          !isRecalledIntoEdit &&
+          (!projectId || queries.isActiveProject(projectId))
+        ) {
           openWorkbenchWidget('generate', { preferredRegions: ['left'] });
         }
+      },
+      openImageInEdit: (image) => {
+        const target = getEditTarget();
+
+        if (hasUnreadableEditHistory(target.getProject(target.projectId))) {
+          notifications.add({ kind: 'info', title: t('widgets.instruct.historyUnreadable') });
+
+          return;
+        }
+
+        openImageInEdit(target, { height: image.height, image_name: image.imageName, width: image.width });
       },
       selectForCompare,
       createCanvasFromImages: async (images) => {

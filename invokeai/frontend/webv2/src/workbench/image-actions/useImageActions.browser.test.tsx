@@ -7,11 +7,13 @@ import type * as WorkflowReact from '@features/workflow/react';
 import type { CreateCanvasFromImagesResult } from '@workbench/canvas-operations/api';
 import type * as SettingsStoreModule from '@workbench/settings/store';
 
+import { takeInstructEntry } from '@features/instruct/core/entryRequests';
 import { seedArchitectureCapabilities } from '@features/models/core/architectureCapabilities.testing';
 import { parseOpenApiToTemplates } from '@features/workflow/react';
 import { accountLifecycle } from '@platform/state/accountLifecycle';
 import { toaster } from '@platform/ui/toaster';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { readStoredEditTree } from '@workbench/projectEditTree';
 import { act, createRef, type Ref, useImperativeHandle } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
@@ -22,6 +24,7 @@ import type { ImageActions } from './useImageActions';
 import { useImageActions } from './useImageActions';
 
 const mocks = vi.hoisted(() => ({
+  activatePreset: vi.fn(),
   addToBoard: vi.fn(),
   canAddToCachedGalleryBoard: vi.fn((..._args: unknown[]) => true),
   createCanvasFromImages: vi.fn((..._args: unknown[]): Promise<CreateCanvasFromImagesResult> =>
@@ -228,6 +231,7 @@ vi.mock('@workbench/WorkbenchContext', () => {
       setCompareImage: vi.fn(),
     },
     generation: { patchSettings: vi.fn() },
+    layout: { activatePreset: (...args: unknown[]) => mocks.activatePreset(...args) },
     projects: { create: (...args: unknown[]) => mocks.createProject(...args) },
     notifications: {
       add: (...args: unknown[]) => mocks.notificationsAdd(...args),
@@ -465,6 +469,66 @@ afterEach(async () => {
   host?.remove();
   host = null;
   root = null;
+});
+
+describe('open in Edit', () => {
+  it('starts nothing over a history this version cannot read, and says why', () => {
+    mocks.getSnapshot.mockReturnValue({ activeProject: { id: 'project-1' } });
+    mocks.getProject.mockReturnValue({ editTree: readStoredEditTree({ nodes: 'newer', rootNodeId: 'x' }) });
+
+    act(() =>
+      actionsRef.current!.openImageInEdit({
+        boardId: 'none',
+        height: 480,
+        imageCategory: 'general',
+        imageName: 'sent.png',
+        imageUrl: '/sent.png',
+        queuedAt: '2026-06-15T00:00:00Z',
+        sourceQueueItemId: 'queue-item',
+        starred: false,
+        thumbnailUrl: '/thumb-sent.png',
+        width: 640,
+      })
+    );
+
+    expect(takeInstructEntry('project-1')).toBeNull();
+    expect(mocks.notificationsAdd).toHaveBeenCalledWith(
+      expect.objectContaining({ title: 'widgets.instruct.historyUnreadable' })
+    );
+    mocks.getProject.mockReset();
+  });
+
+  it('asks the Edit view to start from the image and shows the Edit preset', () => {
+    mocks.getSnapshot.mockReturnValue({ activeProject: { id: 'project-1' } });
+    mocks.isActiveProject.mockReturnValue(true);
+    mocks.getProject.mockReturnValue({
+      layout: { presetId: 'compose' },
+      widgetInstances: {},
+      widgetRegions: { center: { activeInstanceId: null, instanceIds: [] } },
+    });
+
+    act(() =>
+      actionsRef.current!.openImageInEdit({
+        boardId: 'none',
+        height: 480,
+        imageCategory: 'general',
+        imageName: 'sent.png',
+        imageUrl: '/sent.png',
+        queuedAt: '2026-06-15T00:00:00Z',
+        sourceQueueItemId: 'queue-item',
+        starred: false,
+        thumbnailUrl: '/thumb-sent.png',
+        width: 640,
+      })
+    );
+
+    expect(takeInstructEntry('project-1')).toEqual({
+      image: { height: 480, image_name: 'sent.png', width: 640 },
+      projectId: 'project-1',
+    });
+    expect(mocks.activatePreset).toHaveBeenCalledExactlyOnceWith('instruct');
+    mocks.getProject.mockReset();
+  });
 });
 
 describe('canvas destinations', () => {
@@ -1294,6 +1358,8 @@ describe('mixed item mutation outcomes', () => {
     );
     expect(mocks.galleryRemoveItems).toHaveBeenNthCalledWith(1, ['video:gone.mp4', 'image:locked.png'], {
       keepComparisonForSuccessor: true,
+      // The history and references wait for the confirmed pass below.
+      optimistic: true,
       projectId: 'project-1',
     });
 
@@ -1335,6 +1401,7 @@ describe('total transport failure rollback', () => {
 
     expect(mocks.galleryRemoveItems).toHaveBeenNthCalledWith(1, ['image:gone.png'], {
       keepComparisonForSuccessor: true,
+      optimistic: true,
       projectId: 'project-1',
     });
 

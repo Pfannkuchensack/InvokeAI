@@ -8,6 +8,11 @@ import { Box, Flex, HStack, Icon, Image, Progress, SimpleGrid, Spinner, Stack, T
 import { GalleryMediaSlot } from '@features/gallery/mediaSlot';
 import { galleryImageUrls } from '@features/gallery/utility';
 import {
+  subscribeInstructEntry,
+  takeInstructEntry,
+  type InstructEntryRequest,
+} from '@features/instruct/core/entryRequests';
+import {
   getInstructRoute,
   getInstructSteps,
   getInstructTip,
@@ -33,7 +38,7 @@ import {
   WandSparklesIcon,
   XIcon,
 } from 'lucide-react';
-import { memo, useCallback, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useEnsureInstructCatalog, useInstructValues } from './useInstructValues';
@@ -96,42 +101,95 @@ const useCancelStep = () => {
   return { cancel, dialog };
 };
 
+/** What an entry carries beyond the image: see `InstructEntryRequest`. */
+type StartOptions = Pick<InstructEntryRequest, 'continueFromImage' | 'values' | 'valuesIfKept'>;
+
 const useStartFromImage = (onJump?: (nodeId: string) => void) => {
   const ui = useInstructUi();
   const actions = useInstructActions();
   const { t } = useTranslation();
-  const [pending, setPending] = useState<ImageWithDims | null>(null);
+  const [pending, setPending] = useState<{ image: ImageWithDims; options: StartOptions } | null>(null);
   const jumpTo = useCallback(
-    (tree: InstructTreeView, nodeId: string) => {
+    (tree: InstructTreeView, nodeId: string, options: StartOptions) => {
       const route = getInstructRoute(tree, nodeId);
 
       route.slice(0, -1).forEach((node, index) => actions.selectChild(node.id, route[index + 1]!.id));
-      // A node with steps below it is where the next step branches off; the end of a branch needs no mark.
+      // A node with steps below it is where the next step branches off; the end of a branch needs no mark, unless a
+      // recall asks for it.
       actions.patchValues({
-        continueFromNodeId: tree.nodes.some((node) => node.parentId === nodeId) ? nodeId : null,
+        continueFromNodeId:
+          options.continueFromImage || tree.nodes.some((node) => node.parentId === nodeId) ? nodeId : null,
       });
       onJump?.(nodeId);
     },
     [actions, onJump]
   );
   const request = useCallback(
-    (image: ImageWithDims | null) => {
+    (image: ImageWithDims | null, options: StartOptions = {}) => {
       if (!image) {
         return;
       }
 
       const existing = ui.tree?.nodes.find((node) => node.imageName === image.image_name);
 
+      // A newer request replaces one still waiting on the replace dialog, values included.
+      setPending(null);
+
       if (!ui.tree) {
         actions.startFromImage(image);
+        if (options.values) {
+          actions.patchValues(options.values);
+        }
       } else if (existing) {
-        jumpTo(ui.tree, existing.id);
+        jumpTo(ui.tree, existing.id, options);
+        if (options.values) {
+          actions.patchValues(options.values);
+        }
       } else {
-        setPending(image);
+        setPending({ image, options });
       }
     },
     [actions, jumpTo, ui.tree]
   );
+  const { projectId } = ui;
+  const takeEntry = useCallback(() => {
+    const entry = takeInstructEntry(projectId);
+
+    if (entry) {
+      request(entry.image, {
+        continueFromImage: entry.continueFromImage,
+        values: entry.values,
+        valuesIfKept: entry.valuesIfKept,
+      });
+    }
+  }, [projectId, request]);
+
+  // An image sent here from elsewhere (gallery, canvas, recall) waits for this view; one sent while it shows is taken now.
+  useMountEffect(takeEntry);
+  useEffect(() => subscribeInstructEntry(takeEntry), [takeEntry]);
+
+  // The dialog closes after a confirmation too; only a dismissal still has the recall's values to apply.
+  const isConfirmedRef = useRef(false);
+  const applyValues = (values: StartOptions['values']) => {
+    if (values) {
+      actions.patchValues(values);
+    }
+  };
+  const confirm = () => {
+    if (pending) {
+      isConfirmedRef.current = true;
+      actions.startFromImage(pending.image);
+      applyValues(pending.options.values);
+    }
+  };
+  const dismiss = () => {
+    // A recall's values apply even when the user keeps the old history.
+    if (pending && !isConfirmedRef.current) {
+      applyValues(pending.options.valuesIfKept ?? pending.options.values);
+    }
+    isConfirmedRef.current = false;
+    setPending(null);
+  };
   const dialog = (
     <ConfirmDialog
       body={t('widgets.instruct.replaceBody')}
@@ -139,13 +197,8 @@ const useStartFromImage = (onJump?: (nodeId: string) => void) => {
       isDestructive={false}
       isOpen={pending !== null}
       title={t('widgets.instruct.replaceTitle')}
-      onClose={() => setPending(null)}
-      onConfirm={() => {
-        if (pending) {
-          actions.startFromImage(pending);
-        }
-        setPending(null);
-      }}
+      onClose={dismiss}
+      onConfirm={confirm}
     />
   );
 
@@ -158,7 +211,7 @@ const isTextTarget = (target: EventTarget | null): boolean =>
 
 const EmptyView = () => {
   const { t } = useTranslation();
-  const { pasteShortcut } = useInstructUi();
+  const { hasUnreadableHistory, pasteShortcut } = useInstructUi();
   const actions = useInstructActions();
   const [isUploading, setIsUploading] = useState(false);
 
@@ -170,7 +223,8 @@ const EmptyView = () => {
         candidate.type.startsWith('image/')
       );
 
-      if (!file || isModalPresent() || isTextTarget(event.target) || event.defaultPrevented) {
+      // Nothing is uploaded for a history that cannot be started over anyway.
+      if (!file || hasUnreadableHistory || isModalPresent() || isTextTarget(event.target) || event.defaultPrevented) {
         return;
       }
 
@@ -203,20 +257,28 @@ const EmptyView = () => {
             {t('widgets.instruct.emptyBody')}
           </Text>
         </Stack>
-        <Box w="full">
-          <GalleryMediaSlot
-            accept={ACCEPT_IMAGES}
-            busy={isUploading}
-            dropId="instruct-start-slot"
-            labels={{ choose: t('widgets.instruct.chooseImage'), drop: t('widgets.instruct.dropImage') }}
-            layout="tile"
-            value={null}
-            onChange={(item) => request(toImage(item))}
-          />
-        </Box>
-        <Text color="fg.muted" fontSize="xs">
-          {t('widgets.instruct.pasteHint', { keys: pasteShortcut })}
-        </Text>
+        {hasUnreadableHistory ? (
+          <Text color="fg.warning" fontSize="sm" role="status" textWrap="pretty">
+            {t('widgets.instruct.historyUnreadable')}
+          </Text>
+        ) : (
+          <>
+            <Box w="full">
+              <GalleryMediaSlot
+                accept={ACCEPT_IMAGES}
+                busy={isUploading}
+                dropId="instruct-start-slot"
+                labels={{ choose: t('widgets.instruct.chooseImage'), drop: t('widgets.instruct.dropImage') }}
+                layout="tile"
+                value={null}
+                onChange={(item) => request(toImage(item))}
+              />
+            </Box>
+            <Text color="fg.muted" fontSize="xs">
+              {t('widgets.instruct.pasteHint', { keys: pasteShortcut })}
+            </Text>
+          </>
+        )}
       </Stack>
       {dialog}
     </Flex>
@@ -265,6 +327,7 @@ const VariantTile = memo(function VariantTile({
 }) {
   const { t } = useTranslation();
   const actions = useInstructActions();
+  const { missingImages } = useInstructUi();
   const select = useCallback(() => actions.selectChild(parentId, node.id), [actions, node.id, parentId]);
 
   if (node.status === 'pending') {
@@ -311,6 +374,34 @@ const VariantTile = memo(function VariantTile({
   }
 
   const imageName = node.imageName;
+
+  // Not a deleted image (that is stored): this session could not find it, perhaps because it is not shown to this user.
+  if (missingImages.has(imageName)) {
+    const unavailable = (
+      <PlaceholderTile height={node.height} width={node.width}>
+        <Icon as={ImageOffIcon} boxSize="5" color="fg.muted" />
+        <Text color="fg.muted" fontSize="sm">
+          {t('widgets.instruct.unavailable')}
+        </Text>
+      </PlaceholderTile>
+    );
+
+    return choice ? (
+      <Box
+        aria-label={t('widgets.instruct.variantOf', { number: choice.number, total: choice.total })}
+        aria-pressed={choice.isSelected}
+        as="button"
+        cursor="default"
+        data-node-id={node.id}
+        onClick={select}
+      >
+        {unavailable}
+      </Box>
+    ) : (
+      <Box data-node-id={node.id}>{unavailable}</Box>
+    );
+  }
+
   const picture = (
     <Image alt="" h="full" loading="lazy" objectFit="contain" src={galleryImageUrls.thumbnail(imageName)} w="full" />
   );
@@ -441,6 +532,7 @@ const StepMessage = memo(function StepMessage({
   const { t } = useTranslation();
   const actions = useInstructActions();
   const { cancel, dialog: cancelDialog } = useCancelStep();
+  const { missingImages } = useInstructUi();
   const first = step.variants[0]!;
   const isRunning = step.variants.some((node) => node.status === 'pending');
   const canRerun =
@@ -460,13 +552,17 @@ const StepMessage = memo(function StepMessage({
             <HStack flexWrap="wrap" gap="1.5">
               {first.referenceImages.map((reference, index) => (
                 <HStack key={reference.imageName} bg="bg.subtle" gap="1" pe="1.5" rounded="sm">
-                  <Image
-                    alt=""
-                    boxSize="5"
-                    objectFit="cover"
-                    roundedStart="sm"
-                    src={galleryImageUrls.thumbnail(reference.imageName)}
-                  />
+                  {missingImages.has(reference.imageName) ? (
+                    <Icon aria-label={t('widgets.instruct.referenceMissing')} as={ImageOffIcon} boxSize="5" p="0.5" />
+                  ) : (
+                    <Image
+                      alt=""
+                      boxSize="5"
+                      objectFit="cover"
+                      roundedStart="sm"
+                      src={galleryImageUrls.thumbnail(reference.imageName)}
+                    />
+                  )}
                   <Text fontSize="xs">{t('widgets.instruct.imageN', { number: getReferenceNumber(index) })}</Text>
                 </HStack>
               ))}
@@ -527,6 +623,9 @@ const Composer = ({ tree }: { tree: InstructTreeView }) => {
   const draftRef = useRef<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isLocked = tip.status === 'pending';
+  // A step cannot continue from an image this session could not find, any more than from a deleted one.
+  const isTipUnavailable =
+    tip.status !== 'completed' || (tip.imageName !== null && ui.missingImages.has(tip.imageName));
   const text = draft ?? values.instruction;
 
   const commit = useCallback(() => {
@@ -546,8 +645,14 @@ const Composer = ({ tree }: { tree: InstructTreeView }) => {
 
   useRegisterDraftFlusher(commit);
 
-  const reasons = getInstructValidationReasons({ ...values, instruction: text }, undefined);
-  const canSend = !isLocked && tip.status === 'completed' && reasons.length === 0;
+  const unavailableReference = values.references.findIndex((reference) => ui.missingImages.has(reference.image_name));
+  const reasons = [
+    ...(unavailableReference >= 0
+      ? [t('widgets.instruct.referenceUnavailable', { number: getReferenceNumber(unavailableReference) })]
+      : []),
+    ...getInstructValidationReasons({ ...values, instruction: text }, undefined),
+  ];
+  const canSend = !isLocked && !isTipUnavailable && reasons.length === 0;
   const send = () => {
     if (!canSend) {
       return;
@@ -562,7 +667,7 @@ const Composer = ({ tree }: { tree: InstructTreeView }) => {
     }
   };
   const isContinuing = values.continueFromNodeId !== null && tip.id !== tree.path.at(-1)?.id;
-  const fallback = tip.status === 'completed' || isLocked ? undefined : getNearestCompletedAncestor(tree, tip);
+  const fallback = !isTipUnavailable || isLocked ? undefined : getNearestCompletedAncestor(tree, tip);
 
   return (
     <Stack borderColor="border.subtle" borderTopWidth="1px" gap="2" maxW={CHAT_MAX_WIDTH} mx="auto" p="3" w="full">
@@ -577,7 +682,7 @@ const Composer = ({ tree }: { tree: InstructTreeView }) => {
             {t('common.cancel')}
           </Button>
         </HStack>
-      ) : tip.status !== 'completed' ? (
+      ) : isTipUnavailable ? (
         <HStack gap="2">
           <Text color="fg.warning" flex="1" fontSize="sm" role="status">
             {t('widgets.instruct.tipUnavailable')}

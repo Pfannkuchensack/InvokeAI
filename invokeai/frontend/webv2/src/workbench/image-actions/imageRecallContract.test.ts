@@ -306,9 +306,10 @@ const IMAGE_RECALL_CONTRACT = {
   },
 
   edit_source_image_name: {
-    ignored:
-      'Consumed by Edit recall in a later milestone; Generate recall reproduces the run from `ref_images`, which lists ' +
-      'the source first.',
+    consumed:
+      'With `generation_mode: flux2_edit` it sends Recall All and Remix to Edit (the source is the continue point; ' +
+      '`ref_images` minus the source are the extra references). Recall into Generate reproduces the run from ' +
+      '`ref_images`, which lists the source first.',
   },
 
   // Upscale.

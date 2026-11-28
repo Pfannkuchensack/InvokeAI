@@ -213,8 +213,26 @@ export const useRegisterFirstPartyCommands = () => {
         return;
       }
 
+      let isRecalledIntoEdit = false;
       const didRecall = await executeImageRecall({
         commands,
+        editRecall: async (input) => {
+          const { recallIntoEdit } = await import('@workbench/image-actions/editRecall');
+
+          const outcome = await recallIntoEdit(
+            {
+              commands,
+              getProject: queries.getProject,
+              isActiveProject: queries.isActiveProject,
+              projectId: activeProject.id,
+            },
+            input
+          );
+
+          isRecalledIntoEdit = outcome !== 'declined';
+
+          return outcome;
+        },
         // Re-read on every call: recall awaits the image record, and a snapshot from the keypress would overwrite edits
         // and recalls committed meanwhile.
         getGenerateValues: () => {
@@ -239,7 +257,7 @@ export const useRegisterFirstPartyCommands = () => {
       });
 
       assertAccountScopeCurrent(owner);
-      if (didRecall && queries.isActiveProject(activeProject.id)) {
+      if (didRecall && !isRecalledIntoEdit && queries.isActiveProject(activeProject.id)) {
         openWidgetPlacement({
           getWidgetsForRegion,
           options: { preferredRegions: ['left'] },

@@ -1,4 +1,6 @@
+import { takeInstructEntry } from '@features/instruct/core/entryRequests';
 import { accountLifecycle } from '@platform/state/accountLifecycle';
+import { readStoredEditTree } from '@workbench/projectEditTree';
 import { act, createRef, type Ref, useImperativeHandle } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -7,7 +9,10 @@ import { useCreateFromBbox } from './useCreateFromBbox';
 
 const mocks = vi.hoisted(() => ({
   createFromBbox: vi.fn<(options: { destination: string }) => Promise<unknown>>(),
+  activatePreset: vi.fn(),
   notify: { error: vi.fn(), info: vi.fn(), success: vi.fn() },
+  presetId: 'compose',
+  unreadable: false,
   reportError: vi.fn(),
 }));
 
@@ -23,10 +28,21 @@ vi.mock('@workbench/WorkbenchContext', () => ({
   useWorkbenchCommands: () => ({
     canvas: { apply: vi.fn() },
     generation: { patchSettings: vi.fn() },
+    layout: { activatePreset: mocks.activatePreset },
+    widgets: { select: vi.fn() },
     notifications: { reportError: mocks.reportError },
   }),
   useWorkbenchQueries: () => ({
-    getProject: () => undefined,
+    getProject: () => ({
+      ...(mocks.unreadable ? { editTree: readStoredEditTree({ nodes: 'newer', rootNodeId: 'x' }) } : {}),
+      layout: { presetId: mocks.presetId },
+      ...(mocks.presetId === 'instruct'
+        ? {
+            widgetInstances: { 'instruct:center': { typeId: 'instruct' } },
+            widgetRegions: { center: { activeInstanceId: 'instruct:center', instanceIds: ['instruct:center'] } },
+          }
+        : { widgetInstances: {}, widgetRegions: { center: { activeInstanceId: null, instanceIds: [] } } }),
+    }),
     getSnapshot: () => ({ activeProject: { id: 'project-1', widgetInstances: {} } }),
     isActiveProject: () => true,
   }),
@@ -70,6 +86,9 @@ const render = (hosts: { header: boolean; menu: boolean }) =>
 
 beforeEach(async () => {
   vi.clearAllMocks();
+  mocks.presetId = 'compose';
+  mocks.unreadable = false;
+  takeInstructEntry('project-1');
   accountLifecycle.activate('user-a');
   host = document.createElement('div');
   document.body.append(host);
@@ -105,6 +124,45 @@ describe('useCreateFromBbox across surfaces', () => {
     });
     expect(header.current!.isCreating).toBe(false);
     expect(menu.current!.isCreating).toBe(false);
+  });
+
+  it('sends the frame to Edit as its source image and shows the Edit preset', async () => {
+    mocks.createFromBbox.mockResolvedValueOnce({
+      image: { height: 512, imageName: 'frame.png', width: 768 },
+      status: 'uploaded',
+    });
+
+    await act(() => header.current!.createFromBbox('edit'));
+
+    expect(mocks.createFromBbox).toHaveBeenCalledWith(expect.objectContaining({ destination: 'edit' }));
+    expect(takeInstructEntry('project-1')).toEqual({
+      image: { height: 512, image_name: 'frame.png', width: 768 },
+      projectId: 'project-1',
+    });
+    expect(mocks.activatePreset).toHaveBeenCalledWith('instruct');
+  });
+
+  it('uploads nothing and starts no history over one this version cannot read', async () => {
+    mocks.unreadable = true;
+
+    await act(() => header.current!.createFromBbox('edit'));
+
+    expect(mocks.createFromBbox).not.toHaveBeenCalled();
+    expect(mocks.notify.info).toHaveBeenCalledWith('widgets.instruct.historyUnreadable');
+    expect(takeInstructEntry('project-1')).toBeNull();
+  });
+
+  it('does not re-apply the Edit preset when it is already showing', async () => {
+    mocks.presetId = 'instruct';
+    mocks.createFromBbox.mockResolvedValueOnce({
+      image: { height: 512, imageName: 'frame.png', width: 768 },
+      status: 'uploaded',
+    });
+
+    await act(() => header.current!.createFromBbox('edit'));
+
+    expect(takeInstructEntry('project-1')).not.toBeNull();
+    expect(mocks.activatePreset).not.toHaveBeenCalled();
   });
 
   it('releases the gate after a failed create', async () => {

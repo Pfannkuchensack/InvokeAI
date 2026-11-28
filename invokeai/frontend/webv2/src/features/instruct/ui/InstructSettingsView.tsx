@@ -8,7 +8,7 @@ import type {
 import type { ModelTaxonomyType } from '@features/models';
 import type { SeedInputPatch } from '@platform/ui/SeedInput';
 
-import { Box, HStack, Image, Stack, Switch, Text } from '@chakra-ui/react';
+import { Box, HStack, Icon, Image, Stack, Switch, Text } from '@chakra-ui/react';
 import { GalleryMediaSlot } from '@features/gallery/mediaSlot';
 import { galleryImageUrls } from '@features/gallery/utility';
 import {
@@ -73,7 +73,7 @@ import { IconButton } from '@platform/ui/Button';
 import { Combobox } from '@platform/ui/Combobox';
 import { Field } from '@platform/ui/Field';
 import { ScrubberField } from '@platform/ui/ScrubberField';
-import { XIcon } from 'lucide-react';
+import { ImageOffIcon, XIcon } from 'lucide-react';
 import { useCallback, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 
@@ -375,26 +375,42 @@ const ReferenceChip = ({
   label: string;
   onRemove?: () => void;
   removeLabel?: string;
-}) => (
-  <HStack bg="bg.subtle" borderColor="border.subtle" borderWidth="1px" gap="2" p="1.5" pe="2" rounded="md">
-    <Image
-      alt=""
-      boxSize="10"
-      flexShrink={0}
-      objectFit="cover"
-      rounded="sm"
-      src={galleryImageUrls.thumbnail(imageName)}
-    />
-    <Text flex="1" fontSize="sm" fontWeight="500" minW="0">
-      {label}
-    </Text>
-    {onRemove ? (
-      <IconButton aria-label={removeLabel ?? ''} size="xs" tooltip={removeLabel} variant="ghost" onClick={onRemove}>
-        <XIcon />
-      </IconButton>
-    ) : null}
-  </HStack>
-);
+}) => {
+  const { t } = useTranslation();
+  const { missingImages } = useInstructUi();
+  const isMissing = missingImages.has(imageName);
+
+  return (
+    <HStack bg="bg.subtle" borderColor="border.subtle" borderWidth="1px" gap="2" p="1.5" pe="2" rounded="md">
+      {isMissing ? (
+        <Icon
+          aria-label={t('widgets.instruct.referenceMissing')}
+          as={ImageOffIcon}
+          boxSize="10"
+          color="fg.muted"
+          p="2"
+        />
+      ) : (
+        <Image
+          alt=""
+          boxSize="10"
+          flexShrink={0}
+          objectFit="cover"
+          rounded="sm"
+          src={galleryImageUrls.thumbnail(imageName)}
+        />
+      )}
+      <Text flex="1" fontSize="sm" fontWeight="500" minW="0">
+        {isMissing ? `${label} · ${t('widgets.instruct.unavailable')}` : label}
+      </Text>
+      {onRemove ? (
+        <IconButton aria-label={removeLabel ?? ''} size="xs" tooltip={removeLabel} variant="ghost" onClick={onRemove}>
+          <XIcon />
+        </IconButton>
+      ) : null}
+    </HStack>
+  );
+};
 
 const ReferencesSection = () => {
   const { t } = useTranslation();

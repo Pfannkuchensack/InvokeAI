@@ -8,6 +8,7 @@ import { getGalleryAutoAddBoardId } from '@features/gallery/contracts';
 import { uploadGalleryFiles } from '@features/gallery/picker';
 import { canAddToCachedGalleryBoard, ensureGalleryBoardDestinations } from '@features/gallery/queries';
 import {
+  getReferenceNumber,
   InstructUiProvider,
   normalizeInstructValues,
   resolveInstructPatch,
@@ -20,10 +21,11 @@ import {
 } from '@features/models/architecturesStore';
 import { useQueryClient } from '@tanstack/react-query';
 import { submitActiveInvocation } from '@workbench/activeInvocationSubmission';
+import { hasUnreadableEditHistory } from '@workbench/editEntry';
 import { toInstructTreeView } from '@workbench/editSubmission';
 import { formatHotkeyLabel } from '@workbench/hotkeys/keys';
 import { useFindGalleryItem } from '@workbench/image-actions/useFindGalleryItem';
-import { getEditableEditTree, getEditNode } from '@workbench/projectEditTree';
+import { getEditableEditTree, getEditNode, listEditImageNames } from '@workbench/projectEditTree';
 import { describeCanvasInvocationFailure } from '@workbench/widgets/canvas/invoke/canvasInvocationFailure';
 import { getProjectWidgetInstance, getProjectWidgetValues } from '@workbench/widgetState';
 import {
@@ -32,12 +34,13 @@ import {
   useWorkbenchCommands,
   useWorkbenchQueries,
 } from '@workbench/WorkbenchContext';
-import { useCallback, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
 type StepRuns = InstructUiAdapter['stepRuns'];
 
 const EMPTY_RUNS: StepRuns = {};
+const EMPTY_NAMES: ReadonlySet<string> = new Set();
 const PASTE_SHORTCUT = formatHotkeyLabel('mod+v');
 
 /** Each unfinished Edit step's run: waiting for a slot or executing. */
@@ -142,6 +145,11 @@ export const InstructUiAdapterProvider = ({ children }: { children: ReactNode })
     (message) => commands.notifications.reportError({ area: 'instruct', message, namespace: 'generation' }),
     [commands]
   );
+  const [missing, setMissing] = useState<{ names: ReadonlySet<string>; projectId: string }>({
+    names: new Set(),
+    projectId,
+  });
+  const missingImages = missing.projectId === projectId ? missing.names : EMPTY_NAMES;
   const submitRoute = useCallback(
     (editRun?: EditRun) =>
       submitActiveInvocation({
@@ -155,7 +163,20 @@ export const InstructUiAdapterProvider = ({ children }: { children: ReactNode })
       }),
     [commands, queries, t]
   );
-  const submit = useCallback<InstructUiAdapter['submit']>(() => submitRoute(), [submitRoute]);
+  const submit = useCallback<InstructUiAdapter['submit']>(async () => {
+    const target = queries.getProject(projectId);
+    const references = (target ? readSyncedValues(getProjectWidgetValues(target, 'instruct')) : values).references;
+    const unavailable = references.findIndex((reference) => missingImages.has(reference.image_name));
+
+    // Leaving one out would shift the numbers the instruction refers to ("Image 3"), so the step waits for the user.
+    if (unavailable >= 0) {
+      reportError(t('widgets.instruct.referenceUnavailable', { number: getReferenceNumber(unavailable) }));
+
+      return;
+    }
+
+    await submitRoute();
+  }, [missingImages, projectId, queries, reportError, submitRoute, t, values]);
   const cancelStep = useCallback<InstructUiAdapter['cancelStep']>(
     (stepId) => {
       const item = queries.getProject(projectId)?.queue.items.find((candidate) => {
@@ -180,7 +201,7 @@ export const InstructUiAdapterProvider = ({ children }: { children: ReactNode })
         return;
       }
 
-      // The step's own references; their sizes are read again, and one deleted since is left out.
+      // The step's own references; their sizes are read again.
       let references: ImageWithDims[] = [];
 
       try {
@@ -191,6 +212,17 @@ export const InstructUiAdapterProvider = ({ children }: { children: ReactNode })
           : [];
 
         references = found.map((entry) => ({ height: entry.height, image_name: entry.imageName, width: entry.width }));
+
+        // A reference that does not resolve is never dropped: the instruction numbers the references it was written with.
+        const unavailable = node.referenceImages.findIndex(
+          (reference) => !found.some((entry) => entry.imageName === reference.imageName)
+        );
+
+        if (unavailable >= 0) {
+          reportError(t('widgets.instruct.rerunReferenceUnavailable', { number: getReferenceNumber(unavailable) }));
+
+          return;
+        }
       } catch {
         reportError(t('widgets.instruct.rerunFailed'));
 
@@ -252,9 +284,60 @@ export const InstructUiAdapterProvider = ({ children }: { children: ReactNode })
       }),
     [commands, projectId]
   );
+  // Names already looked up per project, so a name is asked about once, however often the history changes.
+  const lookedUp = useRef(new Map<string, Set<string>>());
+  const namesKey = useMemo(() => {
+    const editable = getEditableEditTree(project.editTree);
+    const names = new Set([
+      ...(editable ? listEditImageNames(editable) : []),
+      // The composer's references too: one that is not available blocks the step.
+      ...values.references.map((reference) => reference.image_name),
+    ]);
+
+    return [...names].join('|');
+  }, [project.editTree, values.references]);
+
+  // Images the gallery does not return (deleted elsewhere, or not shown to this user: the lookup cannot tell) are only
+  // remembered for this session. Nothing is written to the project: a hidden image is not a deleted one.
+  useEffect(() => {
+    const done = lookedUp.current.get(projectId) ?? new Set<string>();
+    const names = namesKey ? namesKey.split('|').filter((name) => !done.has(name)) : [];
+
+    if (names.length === 0) {
+      return;
+    }
+
+    names.forEach((name) => done.add(name));
+    lookedUp.current.set(projectId, done);
+    void import('@features/gallery')
+      .then(async ({ GALLERY_REQUEST_MAX_NAMES, galleryImages }) => {
+        const found = new Set<string>();
+
+        for (let offset = 0; offset < names.length; offset += GALLERY_REQUEST_MAX_NAMES) {
+          const batch = await galleryImages.resolveMany(names.slice(offset, offset + GALLERY_REQUEST_MAX_NAMES));
+
+          batch.forEach((entry) => found.add(entry.imageName));
+        }
+
+        const gone = names.filter((name) => !found.has(name));
+
+        if (gone.length > 0) {
+          setMissing((previous) => ({
+            names: new Set([...(previous.projectId === projectId ? previous.names : []), ...gone]),
+            projectId,
+          }));
+        }
+      })
+      // A failed lookup says nothing about the images: ask again when the names next change.
+      .catch(() => names.forEach((name) => done.delete(name)));
+  }, [namesKey, projectId]);
+
+  const hasUnreadableHistory = hasUnreadableEditHistory({ editTree: project.editTree });
   const adapter = useMemo<InstructUiAdapter>(
     () => ({
       abandonStep,
+      hasUnreadableHistory,
+      missingImages,
       cancelStep,
       openImage,
       pasteShortcut: PASTE_SHORTCUT,
@@ -273,6 +356,8 @@ export const InstructUiAdapterProvider = ({ children }: { children: ReactNode })
     }),
     [
       abandonStep,
+      hasUnreadableHistory,
+      missingImages,
       cancelStep,
       openImage,
       patchValues,

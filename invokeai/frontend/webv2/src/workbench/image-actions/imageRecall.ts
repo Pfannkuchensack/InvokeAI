@@ -1392,6 +1392,10 @@ export const isImageRecallKindAvailable = (kind: ImageRecallKind): boolean =>
   kind === 'dimensions' ||
   hasArchitectureCapabilities();
 
+/** The image an Edit workspace step ran from; null for every other record. Recall of these goes to Edit. */
+export const getEditRecallSourceName = (metadata: unknown): string | null =>
+  getString(metadata, 'generation_mode') === 'flux2_edit' ? getString(metadata, 'edit_source_image_name') : null;
+
 export const getImageRecallCapabilities = ({
   currentValues,
   image,

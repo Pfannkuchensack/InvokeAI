@@ -5,6 +5,7 @@ import { ChakraProvider } from '@chakra-ui/react';
 import { DndContext } from '@dnd-kit/core';
 import { GalleryHostProvider, type GalleryHost } from '@features/gallery/picker';
 import { satisfiedSettingsFor } from '@features/generation/core/graphCoverage.testing';
+import { requestInstructEntry, takeInstructEntry } from '@features/instruct/core/entryRequests';
 import { normalizeInstructValues } from '@features/instruct/core/values';
 import { seedArchitectureCapabilities } from '@features/models/core/architectureCapabilities.testing';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -76,6 +77,8 @@ const values = (extra: Record<string, unknown> = {}) => normalizeInstructValues(
 const createAdapter = (overrides: Partial<InstructUiAdapter> = {}): InstructUiAdapter => ({
   abandonStep: vi.fn(),
   cancelStep: vi.fn(),
+  hasUnreadableHistory: false,
+  missingImages: new Set<string>(),
   openImage: vi.fn(),
   patchValues: vi.fn(),
   projectId: 'project-1',
@@ -292,5 +295,195 @@ describe('Edit empty state', () => {
 
     expect(adapter.uploadFile).toHaveBeenCalledTimes(1);
     expect(adapter.startFromImage).toHaveBeenCalledWith(image);
+  });
+});
+
+describe('Edit entry requests', () => {
+  const image = { height: 480, image_name: 'sent.png', width: 640 };
+  const nodes = [node('root', null, 'root'), node('a', 'root', 's1'), node('b', 'a', 's2')];
+  /** The dialog opens in a portal a moment after the request. */
+  const clickButton = async (label: string) => {
+    const find = () => Array.from(document.querySelectorAll('button')).find((button) => button.textContent === label);
+
+    await vi.waitFor(() => expect(find()).toBeDefined());
+    act(() => find()!.click());
+  };
+
+  afterEach(() => {
+    takeInstructEntry('project-1');
+  });
+
+  it('starts the history from an image sent before the view mounted', () => {
+    requestInstructEntry({ image, projectId: 'project-1' });
+    render();
+
+    expect(adapter.startFromImage).toHaveBeenCalledExactlyOnceWith(image);
+  });
+
+  it('starts it from an image sent while the view shows', () => {
+    render();
+    act(() => requestInstructEntry({ image, projectId: 'project-1' }));
+
+    expect(adapter.startFromImage).toHaveBeenCalledExactlyOnceWith(image);
+  });
+
+  it('drops a request for another project: its project was left', () => {
+    requestInstructEntry({ image, projectId: 'project-2' });
+    render();
+
+    expect(adapter.startFromImage).not.toHaveBeenCalled();
+    expect(takeInstructEntry('project-2')).toBeNull();
+  });
+
+  it('lets a newer request replace one waiting on the replace dialog, with only its own values', async () => {
+    const tree = createTree(nodes, ['root', 'a', 'b']);
+
+    requestInstructEntry({ image, projectId: 'project-1', values: { instruction: 'first' } });
+    render({ tree });
+    await vi.waitFor(() => expect(document.querySelector('[role="alertdialog"]')).not.toBeNull());
+    act(() =>
+      requestInstructEntry({
+        image: { height: 480, image_name: 'other.png', width: 640 },
+        projectId: 'project-1',
+        values: { instruction: 'second' },
+      })
+    );
+    await clickButton('widgets.instruct.replaceConfirm');
+
+    expect(adapter.startFromImage).toHaveBeenCalledExactlyOnceWith({
+      height: 480,
+      image_name: 'other.png',
+      width: 640,
+    });
+    expect(adapter.patchValues).toHaveBeenCalledExactlyOnceWith({ instruction: 'second' });
+  });
+
+  it('applies the values meant for keeping the old history when the user does', async () => {
+    requestInstructEntry({
+      image,
+      projectId: 'project-1',
+      values: { instruction: 'recalled', sizeMode: 'auto' },
+      valuesIfKept: { instruction: 'recalled', sizeMode: 'manual' },
+    });
+    render({ tree: createTree(nodes, ['root', 'a', 'b']) });
+    await clickButton('common.cancel');
+
+    expect(adapter.patchValues).toHaveBeenCalledExactlyOnceWith({ instruction: 'recalled', sizeMode: 'manual' });
+  });
+
+  it('asks before replacing a history that does not hold the image, and replaces it once confirmed', async () => {
+    requestInstructEntry({ image, projectId: 'project-1' });
+    render({ tree: createTree(nodes, ['root', 'a', 'b']) });
+
+    expect(adapter.startFromImage).not.toHaveBeenCalled();
+    await clickButton('widgets.instruct.replaceConfirm');
+    expect(adapter.startFromImage).toHaveBeenCalledExactlyOnceWith(image);
+  });
+
+  it('jumps to the node of an image the history already holds, without asking', () => {
+    requestInstructEntry({ image: { height: 64, image_name: 'a.png', width: 64 }, projectId: 'project-1' });
+    render({ tree: createTree(nodes, ['root', 'a', 'b']) });
+
+    expect(adapter.startFromImage).not.toHaveBeenCalled();
+    expect(adapter.selectChild).toHaveBeenCalledWith('root', 'a');
+    // A node with steps below it is where the next step branches off.
+    expect(adapter.patchValues).toHaveBeenCalledWith({ continueFromNodeId: 'a' });
+  });
+
+  it('marks the continue point at the end of a branch when a recall asks for it', () => {
+    requestInstructEntry({
+      continueFromImage: true,
+      image: { height: 64, image_name: 'b.png', width: 64 },
+      projectId: 'project-1',
+      values: { instruction: 'recalled' },
+    });
+    render({ tree: createTree(nodes, ['root', 'a', 'b']) });
+
+    expect(adapter.patchValues).toHaveBeenCalledWith({ continueFromNodeId: 'b' });
+    expect(adapter.patchValues).toHaveBeenCalledWith({ instruction: 'recalled' });
+  });
+
+  it('applies the recalled values after the restart, and also when the user keeps the old history', async () => {
+    const recalled = { instruction: 'recalled' };
+
+    requestInstructEntry({ continueFromImage: true, image, projectId: 'project-1', values: recalled });
+    render({ tree: createTree(nodes, ['root', 'a', 'b']) });
+    await clickButton('widgets.instruct.replaceConfirm');
+
+    expect(adapter.patchValues).toHaveBeenCalledExactlyOnceWith(recalled);
+    expect(vi.mocked(adapter.startFromImage).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(adapter.patchValues).mock.invocationCallOrder[0]!
+    );
+
+    act(() => root.unmount());
+    root = createRoot(container);
+    requestInstructEntry({ continueFromImage: true, image, projectId: 'project-1', values: recalled });
+    render({ tree: createTree(nodes, ['root', 'a', 'b']) });
+    await clickButton('common.cancel');
+
+    expect(adapter.startFromImage).not.toHaveBeenCalled();
+    expect(adapter.patchValues).toHaveBeenCalledExactlyOnceWith(recalled);
+  });
+});
+
+describe('Edit history with images this session could not find', () => {
+  const nodes = [node('root', null, 'root'), node('a', 'root', 's1')];
+
+  it('shows them as not available, apart from deleted ones, and does not continue from one', () => {
+    render({ missingImages: new Set(['a.png']), tree: createTree(nodes, ['root', 'a']) });
+
+    expect(container.textContent).toContain('widgets.instruct.unavailable');
+    expect(container.textContent).not.toContain('widgets.instruct.deleted');
+    expect(container.textContent).toContain('widgets.instruct.tipUnavailable');
+
+    const textarea = getComposer();
+
+    type(textarea, 'make it red');
+    press(textarea, { key: 'Enter' });
+    expect(adapter.submit).not.toHaveBeenCalled();
+  });
+});
+
+describe('Edit composer references this session could not find', () => {
+  it('does not send while one is unavailable, and names it', () => {
+    const reference = { height: 64, image_name: 'gone.png', width: 64 };
+
+    render({
+      missingImages: new Set(['gone.png']),
+      tree: createTree([node('root', null, 'root'), node('a', 'root', 's1')], ['root', 'a']),
+      values: values({ references: [reference] }),
+    });
+    const textarea = getComposer();
+
+    type(textarea, 'make it red');
+    press(textarea, { key: 'Enter' });
+
+    expect(adapter.submit).not.toHaveBeenCalled();
+    const send = container.querySelector('button[aria-label="widgets.instruct.send"]')!;
+
+    expect(document.getElementById(send.getAttribute('aria-describedby')!)?.textContent).toBe(
+      'widgets.instruct.referenceUnavailable'
+    );
+  });
+});
+
+describe('Edit empty state over an unreadable history', () => {
+  it('says so and offers no way to upload, drop or paste an image', async () => {
+    const uploadFile = vi.fn(() => Promise.resolve(null));
+
+    render({ hasUnreadableHistory: true, uploadFile });
+    const transfer = new DataTransfer();
+
+    transfer.items.add(new File(['x'], 'pasted.png', { type: 'image/png' }));
+    await act(async () => {
+      document.body.dispatchEvent(
+        new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: transfer })
+      );
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain('widgets.instruct.historyUnreadable');
+    expect(container.querySelector('input[type="file"]')).toBeNull();
+    expect(uploadFile).not.toHaveBeenCalled();
   });
 });

@@ -272,6 +272,7 @@ const WORKBENCH_RUNTIME_SHARED_MODULES = [
   '/features/video/ui/VideoUiContext.tsx',
   // The Edit port's adapter (eager, in the UI ports) and its lazy widget share these; the workbench state reads the
   // routing and submission rules on queue events. Split out, each costs the editor boot a request.
+  '/features/instruct/core/entryRequests.ts',
   '/features/instruct/core/history.ts',
   '/features/instruct/core/references.ts',
   '/features/instruct/core/size.ts',
@@ -280,6 +281,7 @@ const WORKBENCH_RUNTIME_SHARED_MODULES = [
   '/features/instruct/index.ts',
   '/features/instruct/ui/InstructUiContext.tsx',
   '/workbench/browserId.ts',
+  '/workbench/editEntry.ts',
   '/workbench/editSubmission.ts',
   '/workbench/editTreeRouting.ts',
   '/features/workflow/core/buildGraph.ts',
