@@ -99075,6 +99075,9 @@
                     "$ref": "#/components/schemas/TextLLM_Checkpoint_Config"
                   },
                   {
+                    "$ref": "#/components/schemas/TextLLM_Qwen3VLEncoder_Config"
+                  },
+                  {
                     "$ref": "#/components/schemas/ExternalApiModelConfig"
                   },
                   {
