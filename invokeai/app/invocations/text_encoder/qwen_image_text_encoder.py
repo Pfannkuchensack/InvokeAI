@@ -1,5 +1,6 @@
 import gc
 import json
+import math
 import mmap
 import traceback
 from contextlib import ExitStack
@@ -71,6 +72,13 @@ _QUANTIZED_SIZE_RATIO: dict[str, float] = {"int8": 0.6, "nf4": 0.4}
 
 _IMAGE_PLACEHOLDER = "<|vision_start|><|image_pad|><|vision_end|>"
 
+# How the reference images are presented to the VL encoder.
+# - "legacy": unlabeled placeholders, each image fitted to about 512x512 pixels (QwenImageEditPipeline's prompt).
+# - "edit_plus": "Picture N:" labels and about 384x384 pixels per image (QwenImageEditPlusPipeline's
+#   CONDITION_IMAGE_SIZE).
+ReferenceTemplate = Literal["legacy", "edit_plus"]
+_EDIT_PLUS_CONDITION_PIXELS = 384 * 384
+
 # The encoder as handed from a loader to `_encode`: the model, the device to run it on, and a callback that releases
 # it when `_encode` is done.
 _LoadedEncoder = tuple[torch.nn.Module, torch.device, Callable[[], None]]
@@ -122,11 +130,14 @@ def _read_checkpoint(encoder_path: Path) -> dict[str, torch.Tensor] | None:
     return state_dict
 
 
-def _build_prompt(user_prompt: str, num_images: int) -> str:
+def _build_prompt(user_prompt: str, num_images: int, reference_template: ReferenceTemplate = "legacy") -> str:
     """Build the full prompt with the appropriate template based on whether reference images are provided."""
     if num_images > 0:
         # Edit mode: include vision placeholders for reference images
-        image_tokens = _IMAGE_PLACEHOLDER * num_images
+        if reference_template == "edit_plus":
+            image_tokens = "".join(f"Picture {i + 1}: {_IMAGE_PLACEHOLDER}" for i in range(num_images))
+        else:
+            image_tokens = _IMAGE_PLACEHOLDER * num_images
         return (
             f"<|im_start|>system\n{_EDIT_SYSTEM_PROMPT}<|im_end|>\n"
             f"<|im_start|>user\n{image_tokens}{user_prompt}<|im_end|>\n"
@@ -146,7 +157,7 @@ def _build_prompt(user_prompt: str, num_images: int) -> str:
     title="Prompt - Qwen Image",
     tags=["prompt", "conditioning", "qwen_image"],
     category="conditioning",
-    version="1.2.0",
+    version="1.3.0",
     classification=Classification.Prototype,
     idle_gpu_offloadable=True,
 )
@@ -157,6 +168,12 @@ class QwenImageTextEncoderInvocation(BaseInvocation):
     reference_images: list[ImageField] = InputField(
         default=[],
         description="Reference images to guide the edit. The model can use multiple reference images.",
+    )
+    reference_template: ReferenceTemplate = InputField(
+        default="legacy",
+        description="How reference images are presented to the encoder. 'legacy' places unlabeled images at about "
+        "512x512 pixels each. 'edit_plus' labels them 'Picture 1:', 'Picture 2:', ... and fits each to about "
+        "384x384 pixels, as diffusers' QwenImageEditPlusPipeline does for several reference images.",
     )
     qwen_vl_encoder: QwenVLEncoderField = InputField(
         title="Qwen VL Encoder",
@@ -190,6 +207,18 @@ class QwenImageTextEncoderInvocation(BaseInvocation):
             image = image.resize((new_w, new_h), resample=PILImage.LANCZOS)
         return image
 
+    @staticmethod
+    def _resize_for_edit_plus_encoder(image: PILImage.Image) -> PILImage.Image:
+        """Fit an image to diffusers' QwenImageEditPlusPipeline condition size: `calculate_dimensions` of
+        CONDITION_IMAGE_SIZE at the image's aspect ratio (each side rounded to a multiple of 32), Lanczos."""
+        w, h = image.size
+        new_w = math.sqrt(_EDIT_PLUS_CONDITION_PIXELS * (w / h))
+        new_h = new_w / (w / h)
+        new_size = (round(new_w / 32) * 32, round(new_h / 32) * 32)
+        if min(new_size) <= 0:
+            raise ValueError(f"A {w}x{h} reference image is too elongated to fit the encoder ({new_size}).")
+        return image.resize(new_size, resample=PILImage.LANCZOS)
+
     @torch.no_grad()
     def invoke(self, context: InvocationContext) -> QwenImageConditioningOutput:
         if self.reference_images:
@@ -199,7 +228,10 @@ class QwenImageTextEncoderInvocation(BaseInvocation):
         pil_images: list[PILImage.Image] = []
         for img_field in self.reference_images:
             pil_img = context.images.get_pil(img_field.image_name)
-            pil_img = self._resize_for_vl_encoder(pil_img.convert("RGB"))
+            if self.reference_template == "edit_plus":
+                pil_img = self._resize_for_edit_plus_encoder(pil_img.convert("RGB"))
+            else:
+                pil_img = self._resize_for_vl_encoder(pil_img.convert("RGB"))
             pil_images.append(pil_img)
 
         prompt_embeds, prompt_mask = self._encode(context, pil_images)
@@ -302,7 +334,7 @@ class QwenImageTextEncoderInvocation(BaseInvocation):
         4. Return padded embeddings + attention mask
         """
         # Format the prompt with one vision placeholder per reference image
-        text = _build_prompt(self.prompt, len(images))
+        text = _build_prompt(self.prompt, len(images), self.reference_template)
 
         tokenizer_config = context.models.get_config(self.qwen_vl_encoder.tokenizer)
         # Through the model cache: both encoder loaders serve this tokenizer as a submodel, so

@@ -36,6 +36,7 @@ import {
   getEffectivePrompts,
   getExternalResolutionPresets,
   getGenerationUiPolicy,
+  getInstructionEditSupport,
   isEditBase,
   isSupportedGenerateModel,
   isVaeModelConfig,
@@ -309,9 +310,10 @@ const IMAGE_RECALL_CONTRACT = {
 
   edit_source_image_name: {
     consumed:
-      'With an Edit `generation_mode` (`flux2_edit`, `flux3_edit`, `qwen_image_2_1_edit`) it sends Recall All and Remix to Edit (the source is the continue point; ' +
+      'With an Edit `generation_mode` (`flux2_edit`, `flux3_edit`, `qwen_image_edit`, `qwen_image_2_1_edit`) it sends Recall All and Remix to Edit (the source is the continue point; ' +
       '`ref_images` minus the source are the extra references). Recall into Generate reproduces the run from ' +
-      '`ref_images`, which lists the source first.',
+      '`ref_images`, which lists the source first. For `qwen_image_edit` this is approximate: the Qwen-Edit graph of Generate uses the older ' +
+      'single-reference layout, so it does not reproduce the Edit run.',
   },
 
   // Upscale.
@@ -533,6 +535,7 @@ const generateCase = ({ label, model, settings }: SettingsFixture, baseline: Gen
 const EDIT_REFERENCE_TYPES = {
   flux2: 'flux2_reference_image',
   flux3: 'flux2_reference_image',
+  'qwen-image': 'qwen_image_reference_image',
   'qwen-image-2-1': 'qwen_image_2_1_reference_image',
 } as const satisfies Record<EditBase, string>;
 
@@ -690,7 +693,14 @@ const buildCases = (): RecallCase[] => {
     (fixture, index) => tunedShapes.findIndex((other) => other.model.base === fixture.model.base) === index
   );
   const fixtureFor = (base: string) => firstShapes.find((fixture) => fixture.model.base === base)!;
-  const edit = tunedShapes.filter(({ model }) => isEditBase(model.base)).map((fixture) => editCase(fixture, baseline));
+  // Qwen-Image edits only as its `edit` variant, which no Generate shape is.
+  const qwenEdit = recallTunedSettingsFor('qwen-image', {
+    label: 'diffusers-edit-variant',
+    overrides: { format: 'diffusers', variant: 'edit' },
+  });
+  const edit = [...tunedShapes, qwenEdit]
+    .filter(({ model }) => isEditBase(model.base) && getInstructionEditSupport(model) !== null)
+    .map((fixture) => editCase(fixture, baseline));
   const canvas = firstShapes.flatMap((fixture) =>
     canvasModesFor(fixture.model, fixture.settings).map((mode) => canvasCase(fixture, mode, baseline))
   );

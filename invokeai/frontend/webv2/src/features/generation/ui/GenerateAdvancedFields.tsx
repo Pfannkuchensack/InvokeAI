@@ -1,9 +1,5 @@
 /* oxlint-disable react-perf/jsx-no-new-object-as-prop, react-perf/jsx-no-new-function-as-prop, react-perf/jsx-no-new-array-as-prop, react-perf/jsx-no-jsx-as-prop */
-import type {
-  GenerateModelConfig,
-  GenerateSettings,
-  QwenImageEncoderQuantization,
-} from '@features/generation/core/types';
+import type { GenerateModelConfig, GenerateSettings } from '@features/generation/core/types';
 
 import { chakra, createListCollection, Stack, useRecipe } from '@chakra-ui/react';
 import {
@@ -12,12 +8,7 @@ import {
   getKrea2EditLoraState,
 } from '@features/generation/core/baseGenerationPolicies';
 import { isPidMode, MAX_PID_STEPS, MIN_PID_STEPS } from '@features/generation/core/pid';
-import {
-  isQwenImageEncoderQuantization,
-  isVaeModelConfig,
-  MAX_HIDIFFUSION_RATIO,
-  QWEN_IMAGE_ENCODER_QUANTIZATIONS,
-} from '@features/generation/core/settings';
+import { isVaeModelConfig, MAX_HIDIFFUSION_RATIO } from '@features/generation/core/settings';
 import { useExternalStoreSelector } from '@platform/state/selectors';
 import { Field, Select } from '@platform/ui';
 import { FEATURE_HINT_FIELD_PROPS, FeatureHint, type FeatureHintId } from '@platform/ui/hints';
@@ -33,6 +24,10 @@ import { GenerateFieldContextMenu } from './shared/GenerateFieldContextMenu';
 import { GenerateIssueNotes } from './shared/GenerateIssues';
 import { GenerateToggleSwitch } from './shared/GenerateToggleSwitch';
 import { getFieldResetLabel, isModelDefaultVae } from './shared/modelDefaultSettings';
+import {
+  ENCODER_QUANTIZATION_LABEL_KEYS,
+  QwenImageEncoderQuantizationField,
+} from './shared/QwenImageEncoderQuantizationField';
 
 interface GenerateAdvancedFieldsProps {
   draft: GenerateDraft;
@@ -47,12 +42,6 @@ const VAE_PRECISION_COLLECTION = createListCollection({
     { label: 'FP32', value: 'fp32' },
   ] as const,
 });
-
-const ENCODER_QUANTIZATION_LABEL_KEYS: Record<QwenImageEncoderQuantization, string> = {
-  int8: 'widgets.generate.encoderQuantizationInt8',
-  nf4: 'widgets.generate.encoderQuantizationNf4',
-  none: 'widgets.generate.encoderQuantizationNone',
-};
 
 const selectAdvancedSettings = pickGenerateSettings([
   'cfgRescaleMultiplier',
@@ -124,16 +113,6 @@ export const GenerateAdvancedFields = ({
           { label: t('widgets.generate.pidFit'), value: 'fit' },
           { label: t('widgets.generate.pidNative'), value: 'native' },
         ],
-      }),
-    [t]
-  );
-  const encoderQuantizationCollection = useMemo(
-    () =>
-      createListCollection({
-        items: QWEN_IMAGE_ENCODER_QUANTIZATIONS.map((value) => ({
-          label: t(ENCODER_QUANTIZATION_LABEL_KEYS[value]),
-          value,
-        })),
       }),
     [t]
   );
@@ -495,10 +474,7 @@ export const GenerateAdvancedFields = ({
       {policy.encoderQuantizationVisible ? (
         <GenerateFieldContextMenu
           fieldLabel={t('widgets.generate.encoderQuantization')}
-          copyValue={() =>
-            encoderQuantizationCollection.items.find((item) => item.value === settings.qwenImageEncoderQuantization)
-              ?.label ?? ''
-          }
+          copyValue={() => t(ENCODER_QUANTIZATION_LABEL_KEYS[settings.qwenImageEncoderQuantization])}
           isAtDefault={
             modelDefaults !== null &&
             settings.qwenImageEncoderQuantization === modelDefaults.qwenImageEncoderQuantization
@@ -509,25 +485,10 @@ export const GenerateAdvancedFields = ({
               : undefined
           }
         >
-          <Field
-            hint="encoderQuantization"
-            label={t('widgets.generate.encoderQuantization')}
-            labelPlacement="inside"
-            helpText={t('widgets.generate.encoderQuantizationHelp')}
-          >
-            <Select
-              aria-label={t('widgets.generate.encoderQuantization')}
-              collection={encoderQuantizationCollection}
-              value={[settings.qwenImageEncoderQuantization]}
-              onValueChange={({ value }) => {
-                const quantization = value[0];
-
-                if (isQwenImageEncoderQuantization(quantization)) {
-                  onCommit({ qwenImageEncoderQuantization: quantization });
-                }
-              }}
-            />
-          </Field>
+          <QwenImageEncoderQuantizationField
+            value={settings.qwenImageEncoderQuantization}
+            onChange={(qwenImageEncoderQuantization) => onCommit({ qwenImageEncoderQuantization })}
+          />
         </GenerateFieldContextMenu>
       ) : null}
 

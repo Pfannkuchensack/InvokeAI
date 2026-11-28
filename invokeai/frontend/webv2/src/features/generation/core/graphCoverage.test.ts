@@ -217,7 +217,12 @@ const krea2EditCase = () => {
 const editCases = () =>
   generateGraphCases
     .filter(({ base }) => isEditBase(base))
-    .map(({ base, shape }) => {
+    .map(({ base, shape: generateShape }) => {
+      // Qwen-Image edits only as its `edit` variant; the shapes of the other variants are Generate's.
+      const shape =
+        base === 'qwen-image'
+          ? { ...generateShape, overrides: { ...generateShape.overrides, variant: 'edit' as const } }
+          : generateShape;
       const { filled, model, settings } = satisfiedSettingsFor(base, { ...shape, label: `edit-${shape.label}` });
 
       return {

@@ -1009,7 +1009,10 @@
       "max_reference_images": 5,
       "reference_images_require_variant": "edit",
       "reference_images_require_vision_tower": false,
-      "instruction_edit": null,
+      "instruction_edit": {
+        "requires_variant": "edit",
+        "img2img_start": false
+      },
       "supports_regional_guidance": false,
       "regional_negative": false,
       "clip_skip_max": null,

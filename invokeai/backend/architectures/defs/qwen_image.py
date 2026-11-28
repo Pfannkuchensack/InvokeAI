@@ -2,7 +2,7 @@
 
 from invokeai.backend.architectures.facets.conditioning import ConditioningFacet
 from invokeai.backend.architectures.facets.default_settings import DefaultSettingsFacet
-from invokeai.backend.architectures.facets.features import FeaturesFacet, NegativePrompt
+from invokeai.backend.architectures.facets.features import FeaturesFacet, InstructionEditFacet, NegativePrompt
 from invokeai.backend.architectures.facets.latent_space import WAN21_16, LatentSpaceFacet
 from invokeai.backend.architectures.facets.modality import ModalityFacet
 from invokeai.backend.architectures.facets.vae import VaeCompatibility, VaeFacet
@@ -25,7 +25,7 @@ register(
     DefaultSettingsFacet(
         {None: MainModelDefaultSettings(scheduler="euler_a", steps=40, cfg_scale=4.0, width=1024, height=1024)}
     ),
-    ModalityFacet(frozenset({"txt2img", "img2img", "inpaint", "outpaint"}), metadata_slug="qwen_image"),
+    ModalityFacet(frozenset({"txt2img", "img2img", "inpaint", "outpaint", "edit"}), metadata_slug="qwen_image"),
     FeaturesFacet(
         negative_prompt=NegativePrompt(visible=True, usage="cfg-gated"),
         dimension_grid=16,
@@ -34,6 +34,8 @@ register(
         control_kinds=frozenset({"qwen_image_control"}),
         max_reference_images=5,
         reference_images_require_variant="edit",
+        # Only the edit variant takes instructions; its source is reference image #1 and denoising starts from noise.
+        instruction_edit=InstructionEditFacet(requires_variant="edit", img2img_start=False),
     ),
     VaeFacet(
         frozenset(

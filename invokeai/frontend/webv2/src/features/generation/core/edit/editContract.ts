@@ -41,11 +41,14 @@ export const EDIT_FAMILY_INFO: Record<EditBase, EditFamilyInfo> = {
     refType: 'flux2_reference_image',
     referenceTag: (imageNumber) => `<ref_image_${imageNumber - 1}>`,
   },
+  // Only the edit variant (`requires_variant`); Generate records the same reference type for its own Qwen-Edit graph.
+  'qwen-image': { mode: 'qwen_image_edit', refType: 'qwen_image_reference_image' },
   'qwen-image-2-1': { mode: 'qwen_image_2_1_edit', refType: 'qwen_image_2_1_reference_image' },
 };
 
 /** The settings an edit step reads; prompt and seed enter at submission through the graph's `positive_prompt` and `seed` nodes. */
-export type EditGraphSettings = FamilyPipelineSettings & Pick<GenerateSettings, 'qwen3VLVisionTowerModel'>;
+export type EditGraphSettings = FamilyPipelineSettings &
+  Pick<GenerateSettings, 'qwen3VLVisionTowerModel' | 'qwenImageEncoderQuantization' | 'qwenImageShift'>;
 
 /** Every field the edit graph reads; the record type fails to compile until a new pipeline setting is placed here. */
 export const EDIT_SETTINGS = {
@@ -60,6 +63,8 @@ export const EDIT_SETTINGS = {
   qwen3EncoderModel: true,
   qwen3VLEncoderModel: true,
   qwen3VLVisionTowerModel: true,
+  qwenImageEncoderQuantization: true,
+  qwenImageShift: true,
   qwenVLEncoderModel: true,
   scheduler: true,
   steps: true,

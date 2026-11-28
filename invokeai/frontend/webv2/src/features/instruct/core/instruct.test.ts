@@ -369,6 +369,30 @@ describe('what Send allows is what compiles', () => {
     expect(both(base, { format: 'gguf_quantized' }, {}).reasons).toEqual([]);
   });
 
+  it('refuses a sixth image for Qwen-Image-Edit, in the same words: the source and four references', () => {
+    const { model, settings } = satisfiedSettingsFor('qwen-image', {
+      label: 'edit',
+      overrides: { format: 'diffusers', variant: 'edit' },
+    });
+    const extras = [1, 2, 3, 4, 5].map((index) => image(`extra-${index}.png`));
+    const reasons = getInstructValidationReasons(
+      { ...createDefaultInstructValues([model]), instruction: 'brighter', references: extras, settings },
+      undefined
+    );
+
+    expect(() =>
+      compileEditGraph({
+        model,
+        projectSettings: PROJECT,
+        referenceImages: extras,
+        settings,
+        size: { height: 1024, width: 1024 },
+        source: SOURCE,
+      })
+    ).toThrow(/at most 5 reference images/);
+    expect(reasons).toEqual([expect.stringMatching(/takes at most 5 reference images, the image you edit counted/)]);
+  });
+
   it('refuses FLUX.3 Klein with CFG above 1, as after switching from Klein Base, in the same words', () => {
     const { reasons, refusal } = both('flux3', { format: 'diffusers', variant: 'flux3_klein' }, { cfgScale: 3.5 });
 
@@ -399,19 +423,33 @@ describe('edit bases', () => {
   const shapes = {
     flux2: { label: 'dev', overrides: { format: 'diffusers', variant: 'dev' } },
     flux3: { label: 'klein', overrides: { format: 'diffusers', variant: 'flux3_klein' } },
+    'qwen-image': { label: 'edit', overrides: { format: 'diffusers', variant: 'edit' } },
   } as const;
-  const modelFor = (base: 'flux2' | 'flux3' | 'krea-2' | 'qwen-image-2-1' | 'sdxl' | 'flux' | 'z-image') =>
+  const modelFor = (
+    base: 'flux2' | 'flux3' | 'krea-2' | 'qwen-image' | 'qwen-image-2-1' | 'sdxl' | 'flux' | 'z-image'
+  ) =>
     satisfiedSettingsFor(
       base,
       (shapes as unknown as Record<string, never>)[base] ?? { label: 'd', overrides: { format: 'diffusers' } }
     ).model;
 
   it('are exactly the models the picker accepts', () => {
-    const accepted = (['flux2', 'flux3', 'krea-2', 'qwen-image-2-1', 'sdxl', 'flux', 'z-image'] as const).filter(
-      (base) => isInstructEditModel(modelFor(base))
-    );
+    const accepted = (
+      ['flux2', 'flux3', 'krea-2', 'qwen-image', 'qwen-image-2-1', 'sdxl', 'flux', 'z-image'] as const
+    ).filter((base) => isInstructEditModel(modelFor(base)));
 
     expect([...accepted].sort()).toEqual([...EDIT_BASES].sort());
+  });
+
+  it('offer Qwen-Image only as its edit variant: the other variants cannot edit from instructions', () => {
+    const generate = satisfiedSettingsFor('qwen-image', { label: 'd', overrides: { format: 'diffusers' } }).model;
+    const edit = modelFor('qwen-image');
+
+    expect(edit.variant).toBe('edit');
+    expect(isInstructEditModel(edit)).toBe(true);
+    expect(isInstructEditModel(generate)).toBe(false);
+    expect(getInstructionEditSupport(generate)).toBeNull();
+    expect(getInstructionEditSupport(edit)).toEqual({ img2imgStart: false, maxReferenceImages: 5 });
   });
 
   it('describe FLUX.3 as editing from noise with up to ten images', () => {

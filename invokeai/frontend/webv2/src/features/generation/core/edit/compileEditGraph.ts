@@ -14,6 +14,7 @@ import {
   buildFlux2Pipeline,
   buildFlux3Pipeline,
   buildQwenImage21Pipeline,
+  buildQwenImagePipeline,
   getFlux2PipelineMetadata,
 } from '@features/generation/core/graph';
 import { addEdge, addMetadata, addOutputPostprocessors, toGraphContract } from '@features/generation/core/graphBuilder';
@@ -25,6 +26,7 @@ import {
   getEditValidationIssues,
   pickEditSettings,
 } from './editContract';
+import { addQwenImageEditReferences } from './qwenImageEditReferences';
 
 export { type EditGraphSettings } from './editContract';
 
@@ -59,6 +61,8 @@ interface EditFamilyGraph {
   metadataNode: BackendInvocationContract;
   /** The family's keys of the metadata record. */
   metadata: Record<string, unknown>;
+  /** What the submission sends the negative prompt node, which the record keeps (Edit has no negative prompt field). */
+  negativePrompt?: string;
 }
 
 interface EditFamily {
@@ -116,6 +120,43 @@ const EDIT_FAMILIES: Record<EditBase, EditFamily> = {
           scheduler: 'euler',
           qwen3_vl_encoder: components.qwen3VlEncoderModel ?? undefined,
           vae: vaeModel ?? undefined,
+        },
+        metadataNode: output,
+        output,
+      };
+    },
+  },
+  'qwen-image': {
+    build: (input) => {
+      const { settings } = input;
+      // The result takes the source's aspect at the model's ideal area on its 16 grid (`size`). diffusers' Edit Plus
+      // pipeline derives its default size from the last image instead; Edit deliberately follows the source.
+      const pipeline = buildQwenImagePipeline(toPipelineInput(input), {
+        // The Lightning LoRAs run at a fixed shift; null keeps the node's size-derived one.
+        denoiseFields: settings.qwenImageShift === null ? {} : { shift: settings.qwenImageShift },
+        encoderFields: {
+          // The multi-image Edit Plus path: "Picture N" labels, each image at the 384-pixel condition size.
+          reference_template: 'edit_plus',
+          ...(settings.qwenImageEncoderQuantization === 'none'
+            ? {}
+            : { quantization: settings.qwenImageEncoderQuantization }),
+        },
+      });
+      const { components, denoise, graph, modelLoader, negativeEncoder, output, positiveEncoder, vaeModel } = pipeline;
+
+      addQwenImageEditReferences(graph, { denoise, modelLoader, negativeEncoder, positiveEncoder }, input.images);
+
+      return {
+        graph,
+        // Edit has no negative prompt; like diffusers' examples the negative side is a single space.
+        negativePrompt: ' ',
+        metadata: {
+          qwen_image_component_source: components.sourceModel,
+          qwen_image_quantization: settings.qwenImageEncoderQuantization,
+          qwen_image_qwen_vl_encoder: settings.qwenVLEncoderModel ?? undefined,
+          qwen_image_shift: settings.qwenImageShift ?? 'auto',
+          qwen_image_vae: vaeModel ?? undefined,
+          scheduler: undefined,
         },
         metadataNode: output,
         output,
@@ -185,7 +226,7 @@ export const compileEditGraph = ({
   }
 
   const runtimeProjectSettings = { ...projectSettings, randDevice };
-  const { graph, metadata, metadataNode, output } = family.build({
+  const { graph, metadata, metadataNode, negativePrompt, output } = family.build({
     images,
     model,
     settings,
@@ -203,7 +244,9 @@ export const compileEditGraph = ({
     {
       ...metadata,
       edit_source_image_name: source.image_name,
-      // The source first, as the model reads it, so Generate recalls the run from these alone.
+      // The source first, as the model reads it. Generate recalls the run from these, exactly for the families whose
+      // Generate graph reads references the way Edit does; for `qwen_image_edit` only approximately, since Generate's
+      // Qwen-Edit graph uses the older single-reference layout.
       ref_images: getEditReferenceImages(model.base as EditBase, images),
     }
   );
@@ -217,6 +260,7 @@ export const compileEditGraph = ({
   return {
     backendGraph: graph,
     graph: toGraphContract(graph, `${model.name} edit`),
+    ...(negativePrompt === undefined ? {} : { negativePrompt }),
     negativePromptNodeId: 'negative_prompt',
     positivePromptNodeId: 'positive_prompt',
     seedNodeId: 'seed',

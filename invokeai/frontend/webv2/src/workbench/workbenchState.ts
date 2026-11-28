@@ -4180,7 +4180,7 @@ const enqueueCompiledSnapshot = (
           },
           graph: backendGraph,
           kind: 'generate',
-          negativePrompt: '',
+          negativePrompt: editStep.compiled.negativePrompt ?? '',
           negativePromptNodeId: editStep.compiled.negativePromptNodeId,
           positivePrompt: editStep.instruction,
           positivePromptNodeId: editStep.compiled.positivePromptNodeId,

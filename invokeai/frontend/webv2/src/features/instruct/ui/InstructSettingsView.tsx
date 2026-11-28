@@ -18,8 +18,10 @@ import {
   ConceptRow,
   type ConceptUpdate,
   GenerationSettingsSection,
+  QwenImageEncoderQuantizationField,
   removeConcept,
   SeedField,
+  TimestepShiftField,
   updateConcept,
 } from '@features/generation/components';
 import {
@@ -85,6 +87,7 @@ const STEPS_SLIDER_MAX = 100;
 const NO_LORAS: GenerateLora[] = [];
 
 const SectionIds = {
+  advanced: 'instruct-advanced',
   components: 'instruct-components',
   concepts: 'instruct-concepts',
   model: 'instruct-model',
@@ -287,6 +290,38 @@ const RenderSection = () => {
           step={1}
           value={variants}
           onChange={(next) => Number.isFinite(next) && patchValues({ variants: Math.round(next) })}
+        />
+      </Stack>
+    </GenerationSettingsSection>
+  );
+};
+
+/** What only some families offer: Qwen-Image-Edit's schedule shift (the Lightning LoRAs run at 3) and encoder quantization. */
+const AdvancedSection = () => {
+  const { t } = useTranslation();
+  const { patchValues } = useInstructUi();
+  const { model, settings } = useInstructValues();
+  const patchSettings = useCallback(
+    (patch: Partial<GenerateSettings>) =>
+      patchValues((current) => (current.settings ? { settings: { ...current.settings, ...patch } } : {})),
+    [patchValues]
+  );
+
+  if (!model || !settings || model.base !== 'qwen-image') {
+    return null;
+  }
+
+  return (
+    <GenerationSettingsSection label={t('widgets.generate.advanced')} sectionId={SectionIds.advanced}>
+      <Stack gap="2.5">
+        <TimestepShiftField
+          helpText={t('widgets.generate.qwenImageShiftHelp')}
+          shift={settings.qwenImageShift}
+          onChange={(qwenImageShift) => patchSettings({ qwenImageShift })}
+        />
+        <QwenImageEncoderQuantizationField
+          value={settings.qwenImageEncoderQuantization}
+          onChange={(qwenImageEncoderQuantization) => patchSettings({ qwenImageEncoderQuantization })}
         />
       </Stack>
     </GenerationSettingsSection>
@@ -614,6 +649,7 @@ export const InstructSettingsView = () => {
       <RenderSection />
       <OutputSection />
       <ComponentsSection />
+      <AdvancedSection />
     </Box>
   );
 };

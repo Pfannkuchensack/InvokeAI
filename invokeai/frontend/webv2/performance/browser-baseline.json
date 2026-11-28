@@ -108,9 +108,9 @@
         "largestAssetRawBytes": 770754,
         "otherRawBytes": 343138,
         "requestCount": 85,
-        "scriptRawBytes": 4424485,
+        "scriptRawBytes": 4425233,
         "scriptRequestCount": 80,
-        "totalRawBytes": 4837844
+        "totalRawBytes": 4838592
       },
       "routeReadyMedianMs": 468.5,
       "scriptSourceOwnerSet": "editor-minimal-static",
@@ -146,9 +146,9 @@
         "largestAssetRawBytes": 770754,
         "otherRawBytes": 343138,
         "requestCount": 85,
-        "scriptRawBytes": 4424485,
+        "scriptRawBytes": 4425233,
         "scriptRequestCount": 80,
-        "totalRawBytes": 4837844
+        "totalRawBytes": 4838592
       },
       "routeReadyMedianMs": 464.59999999962747,
       "scriptSourceOwnerSet": "editor-minimal-static",
@@ -162,9 +162,9 @@
         "largestAssetRawBytes": 548651,
         "otherRawBytes": 0,
         "requestCount": 7,
-        "scriptRawBytes": 1067644,
+        "scriptRawBytes": 1067643,
         "scriptRequestCount": 7,
-        "totalRawBytes": 1067644
+        "totalRawBytes": 1067643
       },
       "domContentLoadedMedianMs": 133.89999999850988,
       "id": "editor-canvas",
@@ -184,9 +184,9 @@
         "largestAssetRawBytes": 770754,
         "otherRawBytes": 343138,
         "requestCount": 92,
-        "scriptRawBytes": 5492129,
+        "scriptRawBytes": 5492876,
         "scriptRequestCount": 87,
-        "totalRawBytes": 5905488
+        "totalRawBytes": 5906235
       },
       "routeReadyMedianMs": 1293.800000000745,
       "scriptSourceOwnerSet": "editor-canvas-static",
@@ -200,9 +200,9 @@
         "largestAssetRawBytes": 548651,
         "otherRawBytes": 0,
         "requestCount": 7,
-        "scriptRawBytes": 1067644,
+        "scriptRawBytes": 1067643,
         "scriptRequestCount": 7,
-        "totalRawBytes": 1067644
+        "totalRawBytes": 1067643
       },
       "domContentLoadedMedianMs": 133.90000000037253,
       "id": "editor-canvas",
@@ -222,9 +222,9 @@
         "largestAssetRawBytes": 770754,
         "otherRawBytes": 343138,
         "requestCount": 92,
-        "scriptRawBytes": 5492129,
+        "scriptRawBytes": 5492876,
         "scriptRequestCount": 87,
-        "totalRawBytes": 5905488
+        "totalRawBytes": 5906235
       },
       "routeReadyMedianMs": 1294.300000000745,
       "scriptSourceOwnerSet": "editor-canvas-static",
@@ -238,9 +238,9 @@
         "largestAssetRawBytes": 222290,
         "otherRawBytes": 0,
         "requestCount": 6,
-        "scriptRawBytes": 443786,
+        "scriptRawBytes": 443784,
         "scriptRequestCount": 5,
-        "totalRawBytes": 459199
+        "totalRawBytes": 459197
       },
       "domContentLoadedMedianMs": 133.40000000037253,
       "id": "editor-workflow",
@@ -260,9 +260,9 @@
         "largestAssetRawBytes": 770754,
         "otherRawBytes": 343138,
         "requestCount": 91,
-        "scriptRawBytes": 4868271,
+        "scriptRawBytes": 4869017,
         "scriptRequestCount": 85,
-        "totalRawBytes": 5297043
+        "totalRawBytes": 5297789
       },
       "routeReadyMedianMs": 1276.699999999255,
       "scriptSourceOwnerSet": "editor-workflow-static",
@@ -276,9 +276,9 @@
         "largestAssetRawBytes": 222290,
         "otherRawBytes": 0,
         "requestCount": 6,
-        "scriptRawBytes": 443786,
+        "scriptRawBytes": 443784,
         "scriptRequestCount": 5,
-        "totalRawBytes": 459199
+        "totalRawBytes": 459197
       },
       "domContentLoadedMedianMs": 132.30000000074506,
       "id": "editor-workflow",
@@ -298,9 +298,9 @@
         "largestAssetRawBytes": 770754,
         "otherRawBytes": 343138,
         "requestCount": 91,
-        "scriptRawBytes": 4868271,
+        "scriptRawBytes": 4869017,
         "scriptRequestCount": 85,
-        "totalRawBytes": 5297043
+        "totalRawBytes": 5297789
       },
       "routeReadyMedianMs": 1363.5999999996275,
       "scriptSourceOwnerSet": "editor-workflow-static",
@@ -336,9 +336,9 @@
         "largestAssetRawBytes": 770754,
         "otherRawBytes": 343138,
         "requestCount": 85,
-        "scriptRawBytes": 4424485,
+        "scriptRawBytes": 4425233,
         "scriptRequestCount": 80,
-        "totalRawBytes": 4837844
+        "totalRawBytes": 4838592
       },
       "routeReadyMedianMs": 1494.300000000745,
       "scriptSourceOwnerSet": "editor-minimal-static",
@@ -374,9 +374,9 @@
         "largestAssetRawBytes": 770754,
         "otherRawBytes": 343138,
         "requestCount": 85,
-        "scriptRawBytes": 4424485,
+        "scriptRawBytes": 4425233,
         "scriptRequestCount": 80,
-        "totalRawBytes": 4837844
+        "totalRawBytes": 4838592
       },
       "routeReadyMedianMs": 1513.5,
       "scriptSourceOwnerSet": "editor-minimal-static",
@@ -1130,7 +1130,9 @@
       "source:src/features/generation/ui/shared/GenerateIssues.tsx",
       "source:src/features/generation/ui/shared/GenerateToggleSwitch.tsx",
       "source:src/features/generation/ui/shared/GenerationSectionJumpMenu.tsx",
+      "source:src/features/generation/ui/shared/QwenImageEncoderQuantizationField.tsx",
       "source:src/features/generation/ui/shared/SeedField.tsx",
+      "source:src/features/generation/ui/shared/TimestepShiftField.tsx",
       "source:src/features/generation/ui/shared/modelDefaultSettings.ts",
       "source:src/features/generation/ui/shared/sectionPanel.tsx",
       "source:src/features/generation/ui/useDebouncedDraftValue.ts",
@@ -2198,7 +2200,9 @@
       "source:src/features/generation/ui/shared/GenerateIssues.tsx",
       "source:src/features/generation/ui/shared/GenerateToggleSwitch.tsx",
       "source:src/features/generation/ui/shared/GenerationSectionJumpMenu.tsx",
+      "source:src/features/generation/ui/shared/QwenImageEncoderQuantizationField.tsx",
       "source:src/features/generation/ui/shared/SeedField.tsx",
+      "source:src/features/generation/ui/shared/TimestepShiftField.tsx",
       "source:src/features/generation/ui/shared/modelDefaultSettings.ts",
       "source:src/features/generation/ui/shared/sectionPanel.tsx",
       "source:src/features/generation/ui/useDebouncedDraftValue.ts",
@@ -3594,7 +3598,9 @@
       "source:src/features/generation/ui/shared/GenerateIssues.tsx",
       "source:src/features/generation/ui/shared/GenerateToggleSwitch.tsx",
       "source:src/features/generation/ui/shared/GenerationSectionJumpMenu.tsx",
+      "source:src/features/generation/ui/shared/QwenImageEncoderQuantizationField.tsx",
       "source:src/features/generation/ui/shared/SeedField.tsx",
+      "source:src/features/generation/ui/shared/TimestepShiftField.tsx",
       "source:src/features/generation/ui/shared/modelDefaultSettings.ts",
       "source:src/features/generation/ui/shared/sectionPanel.tsx",
       "source:src/features/generation/ui/useDebouncedDraftValue.ts",

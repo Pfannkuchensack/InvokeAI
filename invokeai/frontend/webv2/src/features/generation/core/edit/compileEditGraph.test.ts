@@ -8,6 +8,7 @@ import { seedArchitectureCapabilities } from '@features/models/core/architecture
 import { describe, expect, it } from 'vitest';
 
 import { compileEditGraph, fitToOptimalArea } from './compileEditGraph';
+import { getQwenEditReferenceSize } from './qwenImageEditReferences';
 
 seedArchitectureCapabilities();
 
@@ -326,6 +327,162 @@ describe('compileEditGraph for FLUX.3', () => {
     expect(klein.nodes.neg_cond).toBeUndefined();
     expect(base.nodes.denoise_latents?.cfg_scale).toBeGreaterThan(1);
     expect(base.nodes.neg_cond).toMatchObject({ type: 'flux3_text_encoder' });
+  });
+});
+
+describe('compileEditGraph for Qwen-Image-Edit', () => {
+  const EDIT: ModelShape = { label: 'edit', overrides: { format: 'diffusers', variant: 'edit' } };
+  const source: ImageWithDims = { height: 1080, image_name: 'source.png', width: 1920 };
+  const refs: ImageWithDims[] = [
+    { height: 600, image_name: 'b.png', width: 800 },
+    { height: 512, image_name: 'a.png', width: 512 },
+  ];
+  const compileEdit = (referenceImages: ImageWithDims[] = refs, patch: Record<string, unknown> = {}) => {
+    const { model, settings } = satisfiedSettingsFor('qwen-image', EDIT);
+
+    return compileEditGraph({
+      model,
+      projectSettings: PROJECT,
+      referenceImages,
+      settings: { ...settings, ...patch },
+      size: { height: 1024, width: 1024 },
+      source,
+    }).backendGraph;
+  };
+  const shown = (graph: BackendGraphContract, encoder: string) =>
+    chainItems(graph, edgeInto(graph, encoder, 'reference_images')?.source.node_id).map(
+      (node) => (node.image as { image_name: string }).image_name
+    );
+
+  it('sizes each reference as diffusers does: one megapixel at its own aspect on the 32 grid', () => {
+    expect(getQwenEditReferenceSize({ height: 1080, width: 1920 })).toEqual({ height: 768, width: 1376 });
+    expect(getQwenEditReferenceSize({ height: 600, width: 800 })).toEqual({ height: 896, width: 1184 });
+    expect(getQwenEditReferenceSize({ height: 512, width: 512 })).toEqual({ height: 1024, width: 1024 });
+    // A small image is brought up to the area as well: the pipeline resizes every reference to it.
+    expect(getQwenEditReferenceSize({ height: 100, width: 100 })).toEqual({ height: 1024, width: 1024 });
+  });
+
+  it('encodes every image at its own size and chains the latents into the denoise, the source first', () => {
+    const graph = compileEdit();
+    const latents = chainItems(graph, edgeInto(graph, 'denoise_latents', 'reference_latents')?.source.node_id);
+
+    expect(latents.map((node) => node.type)).toEqual(['qwen_image_i2l', 'qwen_image_i2l', 'qwen_image_i2l']);
+    expect(latents.map(({ height, width }) => ({ height, width }))).toEqual([
+      { height: 768, width: 1376 },
+      { height: 896, width: 1184 },
+      { height: 1024, width: 1024 },
+    ]);
+    expect(latents.every((node) => node.reference === undefined)).toBe(true);
+
+    // The latent of image N comes from image N.
+    const encodedNames = latents.map((i2l) => {
+      const imageNode = graph.nodes[edgeInto(graph, i2l.id, 'image')!.source.node_id]!;
+
+      return (imageNode.image as { image_name: string }).image_name;
+    });
+
+    expect(encodedNames).toEqual(['source.png', 'b.png', 'a.png']);
+  });
+
+  it('chains collect nodes: none takes more than one item, so the order is defined', () => {
+    const graph = compileEdit();
+    const collects = Object.values(graph.nodes).filter((node) => node.type === 'collect');
+
+    expect(collects).toHaveLength(6);
+    for (const collect of collects) {
+      const items = graph.edges.filter(
+        (edge) => edge.destination.node_id === collect.id && edge.destination.field === 'item'
+      );
+
+      expect(items).toHaveLength(1);
+    }
+  });
+
+  it('shows both encoders the same images in the same order with the Edit Plus template', () => {
+    const graph = compileEdit();
+
+    expect(shown(graph, 'pos_cond')).toEqual(['source.png', 'b.png', 'a.png']);
+    expect(shown(graph, 'neg_cond')).toEqual(['source.png', 'b.png', 'a.png']);
+    expect(graph.nodes.pos_cond).toMatchObject({ reference_template: 'edit_plus', type: 'qwen_image_text_encoder' });
+    expect(graph.nodes.neg_cond).toMatchObject({ reference_template: 'edit_plus', type: 'qwen_image_text_encoder' });
+  });
+
+  it('negates with a single space, sent through the negative prompt node so the record keeps it, and only with CFG above 1', () => {
+    const { model, settings } = satisfiedSettingsFor('qwen-image', EDIT);
+    const compiled = compileEditGraph({
+      model,
+      projectSettings: PROJECT,
+      referenceImages: refs,
+      settings,
+      size: { height: 1024, width: 1024 },
+      source,
+    });
+    const graph = compiled.backendGraph;
+
+    expect(compiled.negativePrompt).toBe(' ');
+    expect(compiled.negativePromptNodeId).toBe('negative_prompt');
+    expect(edgeInto(graph, 'neg_cond', 'prompt')?.source.node_id).toBe('negative_prompt');
+    expect(edgeInto(graph, coreMetadata(graph).id, 'negative_prompt')?.source.node_id).toBe('negative_prompt');
+    expect(edgeInto(graph, 'pos_cond', 'prompt')?.source.node_id).toBe('positive_prompt');
+
+    const noCfg = compileEdit(refs, { cfgScale: 1 });
+
+    expect(noCfg.nodes.neg_cond).toBeUndefined();
+    expect(shown(noCfg, 'pos_cond')).toEqual(['source.png', 'b.png', 'a.png']);
+  });
+
+  it('runs the denoise at the given size and records the edit mode with the references as Generate does', () => {
+    const graph = compileEdit();
+
+    expect(graph.nodes.denoise_latents).toMatchObject({
+      cfg_scale: 4,
+      height: 1024,
+      type: 'qwen_image_denoise',
+      width: 1024,
+    });
+    expect(coreMetadata(graph)).toMatchObject({
+      edit_source_image_name: 'source.png',
+      generation_mode: 'qwen_image_edit',
+      qwen_image_shift: 'auto',
+    });
+    expect(graph.nodes.canvas_output).toMatchObject({ is_intermediate: false, type: 'qwen_image_l2i' });
+    expect(refMetadata(graph)).toEqual([
+      { name: 'source.png', type: 'qwen_image_reference_image' },
+      { name: 'b.png', type: 'qwen_image_reference_image' },
+      { name: 'a.png', type: 'qwen_image_reference_image' },
+    ]);
+  });
+
+  it('sends the shift and the encoder quantization the user chose, to the denoise and to both encoders', () => {
+    const graph = compileEdit(refs, { qwenImageEncoderQuantization: 'nf4', qwenImageShift: 3 });
+
+    expect(graph.nodes.denoise_latents).toMatchObject({ shift: 3 });
+    expect(graph.nodes.pos_cond).toMatchObject({ quantization: 'nf4' });
+    expect(graph.nodes.neg_cond).toMatchObject({ quantization: 'nf4' });
+    expect(coreMetadata(graph)).toMatchObject({ qwen_image_quantization: 'nf4', qwen_image_shift: 3 });
+    expect(compileEdit().nodes.denoise_latents).not.toHaveProperty('shift');
+  });
+
+  it('takes the source and four references and refuses a sixth image', () => {
+    const four = ['1', '2', '3', '4'].map((name) => reference(`${name}.png`));
+
+    expect(() => compileEdit(four)).not.toThrow();
+    expect(() => compileEdit([...four, reference('5.png')])).toThrow(/at most 5 reference images/);
+  });
+
+  it('is not offered for the other variants of the base', () => {
+    const { model, settings } = satisfiedSettingsFor('qwen-image', DIFFUSERS);
+
+    expect(() =>
+      compileEditGraph({
+        model,
+        projectSettings: PROJECT,
+        referenceImages: [],
+        settings,
+        size: { height: 1024, width: 1024 },
+        source,
+      })
+    ).toThrow(/cannot edit images from instructions/);
   });
 });
 

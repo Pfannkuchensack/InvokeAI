@@ -1280,7 +1280,7 @@ interface QwenImagePipelineExtras extends PipelineExtras {
   encoderFields?: Record<string, unknown>;
 }
 
-const buildQwenImagePipeline = (input: FamilyPipelineInput, extras: QwenImagePipelineExtras = {}) => {
+export const buildQwenImagePipeline = (input: FamilyPipelineInput, extras: QwenImagePipelineExtras = {}) => {
   const { model, settings } = input;
   const sourceModel = getCompatibleComponentSource(settings, model);
   const hasBundledComponents = model.format === 'diffusers' || sourceModel;
@@ -1355,6 +1355,8 @@ const buildQwenImagePipeline = (input: FamilyPipelineInput, extras: QwenImagePip
     graph,
     latents: { encodeType: QWEN_IMAGE_ENCODE_TYPE, vae: { field: 'vae', node: modelLoader } },
     layoutPrompt: null,
+    modelLoader,
+    negativeEncoder: negCond,
     output,
     positiveEncoder: posCond,
     vaeModel,

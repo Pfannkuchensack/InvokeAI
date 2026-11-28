@@ -389,6 +389,8 @@ export interface GenerateWidgetValues extends GenerateSettings {
 export interface CompiledGenerateGraph {
   backendGraph: BackendGraphContract;
   graph: GraphContract;
+  /** What the submission sends the negative prompt node, where a family needs more than the empty text (Edit's). */
+  negativePrompt?: string;
   negativePromptNodeId: string;
   positivePromptNodeId: string;
   seedNodeId: string;

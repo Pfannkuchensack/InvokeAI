@@ -2147,7 +2147,7 @@ const getReferenceImageLimit = (model: GenerateModelConfig | undefined): number 
  * The bases `compileEditGraph` has a family for. The backend facet says a base edits; this list says webv2 can run it,
  * so a base the backend declares first is offered only once its family is added here and in the table.
  */
-export const EDIT_BASES = ['flux2', 'flux3', 'qwen-image-2-1'] as const;
+export const EDIT_BASES = ['flux2', 'flux3', 'qwen-image', 'qwen-image-2-1'] as const;
 
 export type EditBase = (typeof EDIT_BASES)[number];
 

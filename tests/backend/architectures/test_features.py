@@ -129,6 +129,7 @@ def test_instruction_edit_is_declared_by_exactly_these_bases() -> None:
     assert declared == {
         "flux2": InstructionEditFacet(requires_variant=None, img2img_start=False),
         "flux3": InstructionEditFacet(requires_variant=None, img2img_start=False),
+        "qwen-image": InstructionEditFacet(requires_variant="edit", img2img_start=False),
         "qwen-image-2-1": InstructionEditFacet(requires_variant=None, img2img_start=False),
     }
 

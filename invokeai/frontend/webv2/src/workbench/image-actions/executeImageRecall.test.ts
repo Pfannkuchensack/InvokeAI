@@ -1552,6 +1552,13 @@ describe.each([
     scheduler: 'euler',
     shape: { label: 'klein-base', overrides: { format: 'diffusers', variant: 'flux3_klein_base' } },
   },
+  // Qwen-Image records no scheduler, so recall settles on the model's default; its shift and the encoder quantization
+  // are what the record carries beyond the others.
+  {
+    base: 'qwen-image' as const,
+    scheduler: 'euler_a',
+    shape: { label: 'edit', overrides: { format: 'diffusers', variant: 'edit' } },
+  },
   {
     base: 'qwen-image-2-1' as const,
     scheduler: 'euler',
@@ -1581,7 +1588,10 @@ describe.each([
           },
         }
       : {};
-  const tuned = { ...base, settings: { ...base.settings, ...components, scheduler } };
+  // Only Qwen-Image's Edit takes a shift and an encoder quantization; a record of another family has neither.
+  const qwenOnly =
+    edited === 'qwen-image' ? {} : { qwenImageEncoderQuantization: 'none' as const, qwenImageShift: null };
+  const tuned = { ...base, settings: { ...base.settings, ...components, ...qwenOnly, scheduler } };
   const extra = { height: 256, image_name: 'extra.png', width: 256 };
   const source = { height: 256, image_name: 'source.png', width: 256 };
   const projectSettings = { useCpuNoise: true, useNsfwChecker: false, useWatermark: false };

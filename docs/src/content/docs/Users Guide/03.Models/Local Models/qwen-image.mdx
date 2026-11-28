@@ -159,6 +159,15 @@ In the workflow editor, reference images go into the **Reference Images** input 
 Image**; connect an **Image to Latents - Qwen Image** node to the **Reference Latents** input of
 **Denoise - Qwen Image** to add the pixel-level reference.
 
+The **Edit** workspace takes a different route to the same model: every image it sends (the image you edit
+first, then the references; up to five in all) is encoded by the VAE at about one megapixel, given to the
+transformer as a list of reference latents, and shown to the encoder as labelled "Picture N" images, the
+multi-reference Edit Plus layout of diffusers' `QwenImageEditPlusPipeline`. Generate and the nodes above keep the
+single pixel-level reference described here. Edit results take the source image's aspect ratio, and its Advanced
+section offers the **Shift** override and the **Encoder quantization** for this model.
+
+Edit always uses the Edit Plus layout: "Picture N" labels for the encoder and every image as reference latents. Qwen Image Edit 2509 and 2511 are recommended. The original 2508 release was trained on the older layout and may edit less well in Edit.
+
 ## LoRA
 
 Qwen Image LoRAs (diffusers PEFT, Kohya, LoKR and LoHA formats) are supported and apply to the transformer and,

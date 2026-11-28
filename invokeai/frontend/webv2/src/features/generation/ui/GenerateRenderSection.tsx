@@ -21,7 +21,6 @@ import {
   DEFAULT_FLUX_DYPE_EXPONENT,
   DEFAULT_FLUX_DYPE_SCALE,
   DEFAULT_MOSS_IMAGE_UNCOND_SKIP_LAYERS,
-  DEFAULT_TIMESTEP_SHIFT,
   FLUX_DYPE_PRESETS,
   getDynamicPromptsConfig,
   getEffectiveIdeogram4Sampling,
@@ -39,9 +38,7 @@ import {
   MAX_FLUX_DYPE_SCALE,
   MAX_KREA2_SEED_VARIANCE_STRENGTH,
   MAX_MOSS_IMAGE_SKIP_LAYER,
-  MAX_TIMESTEP_SHIFT,
   MAX_ZIMAGE_SEED_VARIANCE_STRENGTH,
-  MIN_TIMESTEP_SHIFT,
   MIN_ZIMAGE_SEED_VARIANCE_RANDOMIZE_PERCENT,
   parseMossImageSkipLayers,
 } from '@features/generation/core/settings';
@@ -70,13 +67,10 @@ import { GenerateIssueNotes } from './shared/GenerateIssues';
 import { GenerateToggleSwitch } from './shared/GenerateToggleSwitch';
 import { type DefaultSource, getDefaultSource, getFieldResetLabel } from './shared/modelDefaultSettings';
 import { SeedField as SharedSeedField } from './shared/SeedField';
+import { TimestepShiftField } from './shared/TimestepShiftField';
 import { useDynamicPrompts } from './useDynamicPrompts';
 
 const STEPS_SLIDER_MAX = 100;
-/** The useful shift range; the input accepts the node's full `ge=0` span up to 10. */
-const TIMESTEP_SHIFT_SLIDER_MIN = 1;
-const TIMESTEP_SHIFT_SLIDER_MAX = 7;
-const TIMESTEP_SHIFT_MARKS = [{ label: String(DEFAULT_TIMESTEP_SHIFT), value: DEFAULT_TIMESTEP_SHIFT }];
 /** The exponent's `le=1000` bound is far beyond any documented recipe (0.5–2), so the track stops at 10. */
 const DYPE_EXPONENT_SLIDER_MAX = 10;
 const formatPercent = (value: number): string => `${value}%`;
@@ -513,49 +507,6 @@ const FluxDypeFields = ({ onCommit, settings }: RenderFieldsProps) => {
         </>
       ) : null}
     </>
-  );
-};
-
-/** Null lets the denoise node derive the shift from the image size; the override starts at the Lightning value. */
-const TimestepShiftField = ({
-  helpText,
-  onChange,
-  shift,
-}: {
-  helpText: string;
-  shift: number | null;
-  onChange: (shift: number | null) => void;
-}) => {
-  const { t } = useTranslation();
-
-  return (
-    <GenerateToggleSwitch
-      checked={shift !== null}
-      helpText={helpText}
-      hint="timestepShift"
-      label={t('widgets.generate.timestepShift')}
-      onCheckedChange={(checked) => onChange(checked ? DEFAULT_TIMESTEP_SHIFT : null)}
-    >
-      {shift !== null ? (
-        <SliderNumberField
-          ariaLabel={t('widgets.generate.timestepShift')}
-          marks={TIMESTEP_SHIFT_MARKS}
-          max={TIMESTEP_SHIFT_SLIDER_MAX}
-          min={TIMESTEP_SHIFT_SLIDER_MIN}
-          numberInputMax={MAX_TIMESTEP_SHIFT}
-          numberInputMin={MIN_TIMESTEP_SHIFT}
-          step={0.1}
-          value={shift}
-          // The input reports each keystroke, so typing 0.5 passes through 0. Settings read a shift outside its bounds
-          // as auto, which would drop the override mid-edit; the input clamps it on blur instead.
-          onChange={(next) => {
-            if (next >= MIN_TIMESTEP_SHIFT && next <= MAX_TIMESTEP_SHIFT) {
-              onChange(next);
-            }
-          }}
-        />
-      ) : null}
-    </GenerateToggleSwitch>
   );
 };
 

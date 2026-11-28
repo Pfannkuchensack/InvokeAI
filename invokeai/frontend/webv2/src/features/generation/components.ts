@@ -19,3 +19,5 @@ export { CapabilitiesGate, type CapabilitiesGateProps } from './ui/shared/Capabi
 export { ConceptList, ConceptRow, type ConceptModelPort, type ConceptRowProps } from './ui/shared/ConceptRow';
 // Only lazy widget UIs edit concept lists; exporting it from `settings` would put it in the editor's startup graph.
 export { addConcept, removeConcept, type ConceptUpdate, updateConcept } from './core/conceptList';
+export { QwenImageEncoderQuantizationField } from './ui/shared/QwenImageEncoderQuantizationField';
+export { TimestepShiftField } from './ui/shared/TimestepShiftField';
