@@ -154,6 +154,10 @@ export const WidgetPanelFrame = ({
   );
 };
 
+/** Only docked side and bottom widgets that opt in can float; the center region never offers it. */
+const getFloatableRegion = (manifest: WidgetManifest, region: WorkbenchRegion) =>
+  manifest.allowFloating && isWidgetRegion(region) && region !== 'center' ? region : undefined;
+
 export const WidgetFloatButton = ({
   instanceId,
   manifest,
@@ -166,7 +170,7 @@ export const WidgetFloatButton = ({
   const { t } = useTranslation();
   const { widgets } = useWorkbenchCommands();
   const { focusFloating } = useWorkbenchFocus();
-  const dockableRegion = isWidgetRegion(region) && region !== 'center' ? region : undefined;
+  const dockableRegion = getFloatableRegion(manifest, region);
   // Flush drafts before floating unmounts the docked view; preserve the clicked region as the multi-region instance's
   // dock origin. Focus follows the widget into its window.
   const handleFloat = useCallback(() => {
@@ -178,9 +182,8 @@ export const WidgetFloatButton = ({
     widgets.float(instanceId, dockableRegion, { height: window.innerHeight, width: window.innerWidth });
     focusFloating(instanceId);
   }, [dockableRegion, focusFloating, instanceId, widgets]);
-  const canFloat = Boolean(manifest.allowFloating) && dockableRegion !== undefined;
 
-  if (!canFloat) {
+  if (!dockableRegion) {
     return null;
   }
 
@@ -198,6 +201,24 @@ export const WidgetFloatButton = ({
     </Tooltip>
   );
 };
+
+/** Whether `WidgetHeaderActionsGroup` renders any control, so hoisted chrome can omit an empty container. */
+export const hasWidgetHeaderActions = ({
+  actions,
+  HeaderMenu,
+  manifest,
+  region,
+}: {
+  actions?: ReactNode;
+  HeaderMenu?: WidgetHeaderMenu;
+  manifest: WidgetManifest;
+  region: WorkbenchRegion;
+}) =>
+  Boolean(actions) ||
+  Boolean(manifest.settings) ||
+  Boolean(HeaderMenu) ||
+  Boolean(manifest.graphBearing?.surfaces.includes(region)) ||
+  getFloatableRegion(manifest, region) !== undefined;
 
 /** Share widget actions, settings, float, and overflow between panel headers and hoisted center chrome. */
 export const WidgetHeaderActionsGroup = ({

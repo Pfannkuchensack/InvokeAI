@@ -190,7 +190,7 @@ import {
   sanitizeSampleSeed,
   syncGenerateWidgetValuesWithModels,
 } from '@features/generation/settings';
-import { clearDeletedInstructReferences } from '@features/instruct';
+import { clearDeletedInstructReferences, createDefaultInstructValues } from '@features/instruct';
 import { getQueueSourceResultSelection, MAX_QUEUE_BATCH_ITEMS } from '@features/queue';
 import {
   getAutoSwitchFollowedLive,
@@ -471,6 +471,7 @@ type WorkbenchReducerAction =
     } & Partial<ExpandedPositivePrompts>)
   | { type: 'startEditTree'; projectId: string; source: { imageName: string; width: number; height: number } }
   | { type: 'selectEditChild'; projectId: string; branchId: string; childId: string }
+  | { type: 'resetEdit'; projectId: string }
   | { type: 'settleStaleEditNodes'; projectId: string; origin: string }
   | { type: 'abandonEditStep'; projectId: string; stepId: string }
   | {
@@ -5849,6 +5850,31 @@ const reduceWorkbenchAction = (
       });
 
       return failure ? addEditFailureNotification(next, action.projectId, failure, failureKey) : next;
+    }
+    case 'resetEdit': {
+      let unreadable = false;
+      const next = updateProjectById(state, action.projectId, (project) => {
+        // A history this build cannot read is a newer build's data (projects/README.md): reset never drops it.
+        if (project.editTree && !getEditableEditTree(project.editTree)) {
+          unreadable = true;
+
+          return project;
+        }
+
+        const { editTree: _history, ...rest } = project;
+
+        // Stored without a model, as a fresh project's values are; the catalog sync shows the default edit model.
+        return updateProjectWidgetValues(rest, 'instruct', () => ({ ...createDefaultInstructValues() }));
+      });
+
+      return unreadable
+        ? addEditFailureNotification(
+            next,
+            action.projectId,
+            'This project has an edit history this version cannot read, so it was not reset.',
+            'widgets.instruct.historyUnreadableNotReset'
+          )
+        : next;
     }
     case 'selectEditChild': {
       return updateProjectById(state, action.projectId, (project) => {

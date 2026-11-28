@@ -76,6 +76,7 @@ const values = (extra: Record<string, unknown> = {}) => normalizeInstructValues(
 
 const createAdapter = (overrides: Partial<InstructUiAdapter> = {}): InstructUiAdapter => ({
   abandonStep: vi.fn(),
+  canReset: false,
   cancelStep: vi.fn(),
   hasUnreadableHistory: false,
   missingImages: new Set<string>(),
@@ -85,6 +86,7 @@ const createAdapter = (overrides: Partial<InstructUiAdapter> = {}): InstructUiAd
   pasteShortcut: 'Ctrl+V',
   readValues: () => values(),
   reportError: vi.fn(),
+  reset: vi.fn(),
   runAgain: vi.fn(() => Promise.resolve()),
   selectChild: vi.fn(),
   startFromImage: vi.fn(),

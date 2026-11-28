@@ -10,6 +10,7 @@ import { canAddToCachedGalleryBoard, ensureGalleryBoardDestinations } from '@fea
 import {
   getReferenceNumber,
   InstructUiProvider,
+  createDefaultInstructValues,
   normalizeInstructValues,
   resolveInstructPatch,
   syncInstructValuesWithModels,
@@ -123,6 +124,19 @@ export const InstructUiAdapterProvider = ({ children }: { children: ReactNode })
       : stored;
   }, [capabilitiesStatus, models, modelsStatus, rawValues]);
 
+  // What the panel shows right after a reset: the stored defaults, followed to the installed models like any value.
+  const canReset = useMemo(() => {
+    const defaults =
+      modelsStatus === 'loaded' && capabilitiesStatus === 'loaded'
+        ? syncInstructValuesWithModels(createDefaultInstructValues(), models)
+        : createDefaultInstructValues();
+
+    return project.editTree !== undefined || JSON.stringify(values) !== JSON.stringify(defaults);
+  }, [capabilitiesStatus, models, modelsStatus, project.editTree, values]);
+  const reset = useCallback<InstructUiAdapter['reset']>(
+    () => commands.edit.reset({ projectId }),
+    [commands, projectId]
+  );
   const patchValues = useCallback<InstructUiAdapter['patchValues']>(
     (patch) =>
       commands.widgets.patchValues(
@@ -336,6 +350,7 @@ export const InstructUiAdapterProvider = ({ children }: { children: ReactNode })
   const adapter = useMemo<InstructUiAdapter>(
     () => ({
       abandonStep,
+      canReset,
       hasUnreadableHistory,
       missingImages,
       cancelStep,
@@ -345,6 +360,7 @@ export const InstructUiAdapterProvider = ({ children }: { children: ReactNode })
       projectId,
       readValues,
       reportError,
+      reset,
       runAgain,
       selectChild,
       startFromImage,
@@ -356,6 +372,7 @@ export const InstructUiAdapterProvider = ({ children }: { children: ReactNode })
     }),
     [
       abandonStep,
+      canReset,
       hasUnreadableHistory,
       missingImages,
       cancelStep,
@@ -364,6 +381,7 @@ export const InstructUiAdapterProvider = ({ children }: { children: ReactNode })
       projectId,
       readValues,
       reportError,
+      reset,
       runAgain,
       selectChild,
       startFromImage,

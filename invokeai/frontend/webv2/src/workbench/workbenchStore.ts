@@ -106,6 +106,7 @@ const createCommands = (
     },
     edit: {
       abandonStep: command('abandonEditStep'),
+      reset: command('resetEdit'),
       selectChild: command('selectEditChild'),
       start: command('startEditTree'),
     },

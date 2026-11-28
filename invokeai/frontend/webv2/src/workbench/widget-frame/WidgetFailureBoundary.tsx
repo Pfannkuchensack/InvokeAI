@@ -20,6 +20,7 @@ import { resolveWidgetInstanceLabel } from '@workbench/widgetLabels';
 import { TriangleAlertIcon } from 'lucide-react';
 import {
   Component,
+  type ComponentType,
   type ErrorInfo,
   type MouseEvent,
   type KeyboardEvent,
@@ -37,6 +38,8 @@ const widgetFailureLogger = createLogger({ area: 'widget-render', namespace: 'sy
 interface WidgetFailureBoundaryProps {
   children: ReactNode;
   fallback?: ReactNode;
+  /** Wraps the default failure UI (not a custom `fallback`), for hosts whose chrome must contain it. */
+  failureContainer?: ComponentType<{ children: ReactNode }>;
   isRetrying?: boolean;
   framed?: boolean;
   /** Retain region framing, size, and resize handles on failure; headless hosts omit presentation context. */
@@ -471,8 +474,18 @@ export class WidgetFailureBoundary extends Component<WidgetFailureBoundaryProps,
   }
 
   render() {
-    const { children, framed, isRetrying, instance, presentation, region, widget, widgetId, onRequestReload } =
-      this.props;
+    const {
+      children,
+      failureContainer: FailureContainer,
+      framed,
+      isRetrying,
+      instance,
+      presentation,
+      region,
+      widget,
+      widgetId,
+      onRequestReload,
+    } = this.props;
     const { details, error } = this.state;
 
     if (!error) {
@@ -482,7 +495,7 @@ export class WidgetFailureBoundary extends Component<WidgetFailureBoundaryProps,
       return this.props.fallback;
     }
 
-    return (
+    const failure = (
       <Box data-testid="widget-failure" display="contents">
         <WidgetFailureFallback
           details={details ?? error.message}
@@ -500,5 +513,7 @@ export class WidgetFailureBoundary extends Component<WidgetFailureBoundaryProps,
         />
       </Box>
     );
+
+    return FailureContainer ? <FailureContainer>{failure}</FailureContainer> : failure;
   }
 }

@@ -48,6 +48,7 @@ const renderWith = (base: 'flux2' | 'qwen-image', overrides: Record<string, unkn
   const patchValues = vi.fn();
   const adapter: InstructUiAdapter = {
     abandonStep: vi.fn(),
+    canReset: false,
     cancelStep: vi.fn(),
     hasUnreadableHistory: false,
     missingImages: new Set<string>(),
@@ -57,6 +58,7 @@ const renderWith = (base: 'flux2' | 'qwen-image', overrides: Record<string, unkn
     projectId: 'project-1',
     readValues: () => values,
     reportError: vi.fn(),
+    reset: vi.fn(),
     runAgain: vi.fn(() => Promise.resolve()),
     selectChild: vi.fn(),
     startFromImage: vi.fn(),

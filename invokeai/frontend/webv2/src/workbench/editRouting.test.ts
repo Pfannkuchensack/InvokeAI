@@ -3,7 +3,7 @@ import type { InstructWidgetValues } from '@features/instruct';
 import type { Project, WorkbenchState } from '@workbench/projectContracts';
 
 import { satisfiedSettingsFor } from '@features/generation/core/graphCoverage.testing';
-import { resolveInstructPatch } from '@features/instruct';
+import { createDefaultInstructValues, resolveInstructPatch } from '@features/instruct';
 import { seedArchitectureCapabilities } from '@features/models/core/architectureCapabilities.testing';
 import { describe, expect, it } from 'vitest';
 
@@ -572,6 +572,46 @@ describe('Deleting images an Edit history uses', () => {
 
     expect(getActive(after).editTree).toBe(unreadable);
     expect(after.notifications.at(-1)).toMatchObject({ kind: 'error', titleKey: 'widgets.instruct.historyNotUpdated' });
+  });
+
+  it('resets the history and the Edit settings, and takes no late result from a run queued before', async () => {
+    const { state } = await submitStep(createEditState());
+    const item = getItem(state);
+    const reset = workbenchReducer(state, { projectId: getActive(state).id, type: 'resetEdit' });
+
+    expect(getActive(reset).editTree).toBeUndefined();
+    expect(getProjectWidgetValues(getActive(reset), 'instruct')).toEqual(createDefaultInstructValues());
+    expect(reset.notifications).toEqual(state.notifications);
+
+    const done = workbenchReducer(reset, {
+      images: [image('a.png', item.id), image('b.png', item.id)],
+      projectId: getActive(state).id,
+      queueItemId: item.id,
+      type: 'routeQueueItemResults',
+    });
+
+    expect(getActive(done).editTree).toBeUndefined();
+    expect(getProjectWidgetValues(getActive(done), 'instruct')).toEqual(createDefaultInstructValues());
+    expect(getActive(done).queue.items[0]?.resultImages?.map((entry) => entry.imageName)).toEqual(['a.png', 'b.png']);
+  });
+
+  it('does not reset over an edit history this build cannot read, and says so', () => {
+    const state = createEditState();
+    const unreadable = readStoredEditTree({ nodes: 'newer format', rootNodeId: 'x' });
+    const held = {
+      ...state,
+      projects: state.projects.map((project) => ({ ...project, editTree: unreadable })),
+    } as WorkbenchState;
+    const after = workbenchReducer(held, { projectId: held.activeProjectId, type: 'resetEdit' });
+
+    expect(getActive(after).editTree).toBe(unreadable);
+    expect(getProjectWidgetValues(getActive(after), 'instruct')).toBe(
+      getProjectWidgetValues(getActive(held), 'instruct')
+    );
+    expect(after.notifications.at(-1)).toMatchObject({
+      kind: 'error',
+      messageKey: 'widgets.instruct.historyUnreadableNotReset',
+    });
   });
 
   it('leaves the history and the references alone when none of the images is theirs', async () => {

@@ -3,7 +3,7 @@ import { Box, ChakraProvider, HStack, Menu, Portal, Text } from '@chakra-ui/reac
 import { system } from '@theme/system';
 import { createWidgetRecovery } from '@workbench/widget-frame/widgetRecoveryStore';
 import { createInstance } from 'i18next';
-import { act, type ComponentType, type ReactNode } from 'react';
+import { act, Fragment, type ComponentType, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { I18nextProvider, initReactI18next } from 'react-i18next';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -64,6 +64,8 @@ const centerAreaMocks = vi.hoisted(() => {
       label: ComponentType<{ region: 'center' }>;
     },
     dockFloating: vi.fn(),
+    /** Whether the active widget has anything to show in its `actions` chrome slot. */
+    hasActions: true,
     focusFloating: vi.fn(),
     focusRegion: vi.fn(),
     project,
@@ -132,26 +134,40 @@ vi.mock('@workbench/WorkbenchContext', () => ({
 }));
 vi.mock('@workbench/widget-frame', () => ({
   WidgetIdentityIcon: () => <Box boxSize="3.5" />,
-  WidgetChromeSlotById: ({ slot }: { slot: 'actions' | 'label' | 'icon' }) => {
+  WidgetChromeSlotById: ({
+    container: Container = Fragment,
+    slot,
+  }: {
+    container?: ComponentType<{ children: ReactNode }>;
+    slot: 'actions' | 'label' | 'icon';
+  }) => {
     if (slot === 'icon') {
       return <Box boxSize="3.5" />;
+    }
+    // The real slot renders neither controls nor container for a widget without actions.
+    if (slot === 'actions' && !centerAreaMocks.hasActions) {
+      return null;
     }
     const Slot = centerAreaMocks.chromeSlots?.[slot];
 
     if (Slot) {
       return slot === 'actions' ? (
-        <>
+        <Container>
           <Slot region="center" />
           <Box aria-label="Widget settings" as="button" boxSize="6" flexShrink={0} />
           <Box aria-label="Widget menu" as="button" boxSize="6" flexShrink={0} />
-        </>
+        </Container>
       ) : (
         <Slot region="center" />
       );
     }
 
     if (slot === 'actions') {
-      return <Box data-testid="trailing-actions" flexShrink={0} w={centerAreaMocks.trailingActionsWidth} />;
+      return (
+        <Container>
+          <Box data-testid="trailing-actions" flexShrink={0} w={centerAreaMocks.trailingActionsWidth} />
+        </Container>
+      );
     }
 
     return (
@@ -274,6 +290,26 @@ describe('CenterArea chrome layout', () => {
       expect(row.scrollWidth).toBeGreaterThan(row.clientWidth);
       expect(island.querySelector('[data-overflow-cue="end"]')).not.toBeNull();
     }
+  });
+});
+
+describe('CenterArea end island', () => {
+  afterEach(() => {
+    centerAreaMocks.hasActions = true;
+  });
+
+  it('is present for a widget with actions', async () => {
+    await render(<CenterArea />);
+
+    expect(host!.querySelectorAll('[data-center-chrome-island]')).toHaveLength(2);
+  });
+
+  it('is absent for a widget with neither actions nor toolbar items', async () => {
+    centerAreaMocks.hasActions = false;
+    await render(<CenterArea />);
+
+    expect(host!.querySelectorAll('[data-center-chrome-island]')).toHaveLength(1);
+    expect(host!.querySelector('button[aria-label^="Center view"]')).not.toBeNull();
   });
 });
 

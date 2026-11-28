@@ -18,6 +18,8 @@ export interface InstructUiActions {
   /** The widget's values as they are now, without subscribing, for writes that complete later. */
   readValues(): InstructWidgetValues;
   reportError(message: string): void;
+  /** Clears the edit history and the widget's values (the caller has confirmed); a history this version cannot read stays. */
+  reset(): void;
   /** Runs a step's own instruction and references again under its parent, as a new step; the composer is left alone. */
   runAgain(nodeId: string): Promise<void>;
   selectChild(branchId: string, childId: string): void;
@@ -31,6 +33,8 @@ export interface InstructUiActions {
 
 /** Workbench supplies this port: the edit tree, the queue and the project belong to it, and features cannot import it. */
 export interface InstructUiAdapter extends InstructUiActions {
+  /** There is a history or a changed value that a reset would clear (an unreadable history counts: reset reports it). */
+  canReset: boolean;
   /** The project holds an edit history this version cannot read; none can be started over it. */
   hasUnreadableHistory: boolean;
   /** Images the history names that the gallery no longer has, as far as they have been looked up. */
@@ -58,6 +62,7 @@ export const InstructUiProvider = ({ adapter, children }: { adapter: InstructUiA
     patchValues,
     readValues,
     reportError,
+    reset,
     runAgain,
     selectChild,
     startFromImage,
@@ -72,6 +77,7 @@ export const InstructUiProvider = ({ adapter, children }: { adapter: InstructUiA
       patchValues,
       readValues,
       reportError,
+      reset,
       runAgain,
       selectChild,
       startFromImage,
@@ -85,6 +91,7 @@ export const InstructUiProvider = ({ adapter, children }: { adapter: InstructUiA
       patchValues,
       readValues,
       reportError,
+      reset,
       runAgain,
       selectChild,
       startFromImage,
