@@ -37,6 +37,8 @@ const STACK_KINDS = Object.keys(STACK_SURFACES) as StackKind[];
 const PROJECT_FIELDS = {
   // The surfaces read only part of it; the rest, later additions included, is scanned.
   canvas: 'scanned',
+  // Every node's image and reference names; a dedicated surface is separate from this fail-safe scan.
+  editTree: 'scanned',
   // Session-only; names every generated image.
   events: 'excluded',
   floatingWidgets: 'scanned',

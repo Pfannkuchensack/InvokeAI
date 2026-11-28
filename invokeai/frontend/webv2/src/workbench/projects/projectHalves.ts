@@ -1,3 +1,5 @@
+import { joinStoredEditTree, splitStoredEditTree } from '@workbench/projectEditTree';
+
 import type { ProjectDocumentMigration, ProjectDocumentV3 } from './projectDocument';
 
 import { PROJECT_DOCUMENT_SCHEMA_VERSION, PROJECT_SPLIT_DOCUMENT_SCHEMA_VERSION } from './documentSchemaVersion';
@@ -20,6 +22,8 @@ export interface ProjectContentV4 {
   canvas: Omit<CanvasState, 'stagingArea'>;
   /** Each entry without its last run, which belongs to whoever ran it. */
   workflows: { entries: Omit<ProjectWorkflowEntry, 'lastRun'>[] };
+  /** The Edit tree's nodes; which child each branch shows is the workspace's. */
+  editTree?: unknown;
 }
 
 export interface ProjectWorkspaceV4 extends Pick<
@@ -39,6 +43,7 @@ export interface ProjectWorkspaceV4 extends Pick<
   documentSchemaVersion: typeof PROJECT_SPLIT_DOCUMENT_SCHEMA_VERSION;
   canvas: { selectedLayerId: string | null; stagingArea: CanvasState['stagingArea'] };
   workflows: { activeWorkflowId: string; lastRuns: Record<string, ProjectWorkflowRunPreview> };
+  editTree?: { selection: unknown };
 }
 
 /**
@@ -48,6 +53,7 @@ export interface ProjectWorkspaceV4 extends Pick<
 export const PROJECT_DOCUMENT_HALVES = {
   canvas: 'both',
   documentSchemaVersion: 'both',
+  editTree: 'both',
   floatingWidgets: 'workspace',
   id: 'content',
   invocation: 'workspace',
@@ -83,9 +89,11 @@ export const splitProjectDocument = (document: ProjectDocumentV3): ProjectHalves
     }
     return entry;
   });
+  const editTree = document.editTree === undefined ? null : splitStoredEditTree(document.editTree);
   const content: ProjectContentV4 = {
     canvas: { ...canvas, document: { ...canvas.document, selectedLayerId: null } },
     documentSchemaVersion: PROJECT_SPLIT_DOCUMENT_SCHEMA_VERSION,
+    ...(editTree ? { editTree: editTree.content } : {}),
     id: document.id,
     name: document.name,
     workflows: { entries },
@@ -93,6 +101,7 @@ export const splitProjectDocument = (document: ProjectDocumentV3): ProjectHalves
   const workspace: ProjectWorkspaceV4 = {
     canvas: { selectedLayerId: document.canvas.document.selectedLayerId, stagingArea },
     documentSchemaVersion: PROJECT_SPLIT_DOCUMENT_SCHEMA_VERSION,
+    ...(editTree?.workspace ? { editTree: editTree.workspace } : {}),
     ...(document.floatingWidgets ? { floatingWidgets: document.floatingWidgets } : {}),
     invocation: document.invocation,
     ...(document.lastFloatingGeometry ? { lastFloatingGeometry: document.lastFloatingGeometry } : {}),
@@ -182,10 +191,12 @@ export const joinProjectDocument = (
   const {
     canvas: _ownCanvas,
     documentSchemaVersion: _workspaceSchema,
+    editTree: ownEditTree,
     workflows: _ownWorkflows,
     ...workspaceFields
   } = own;
-  const { documentSchemaVersion: _contentSchema, ...contentFields } = content;
+  const { documentSchemaVersion: _contentSchema, editTree: contentEditTree, ...contentFields } = content;
+  const editTree = joinStoredEditTree(contentEditTree, ownEditTree);
 
   return {
     document: {
@@ -199,6 +210,7 @@ export const joinProjectDocument = (
         },
         ...(ownCanvas.stagingArea === undefined ? {} : { stagingArea: ownCanvas.stagingArea }),
       },
+      ...(editTree === undefined ? {} : { editTree }),
       // The whole-document schema the browser works in; the migration boundary reads it as current.
       documentSchemaVersion: PROJECT_DOCUMENT_SCHEMA_VERSION,
       workflows: {

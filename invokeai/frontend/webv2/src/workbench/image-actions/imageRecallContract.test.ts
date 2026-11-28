@@ -27,6 +27,7 @@ import {
   recallTunedSettingsFor,
   sdxlRefinerRecallCase,
 } from '@features/generation/core/graphCoverage.testing';
+import { compileEditGraph } from '@features/generation/editGraph';
 import { compileGenerateGraph } from '@features/generation/graph';
 import {
   deriveAspectRatioId,
@@ -304,6 +305,12 @@ const IMAGE_RECALL_CONTRACT = {
       'guidance layers from `canvas_v3_metadata` instead.',
   },
 
+  edit_source_image_name: {
+    ignored:
+      'Consumed by Edit recall in a later milestone; Generate recall reproduces the run from `ref_images`, which lists ' +
+      'the source first.',
+  },
+
   // Upscale.
   creativity: { ignored: UPSCALE_SETTING },
   structure: { ignored: UPSCALE_SETTING },
@@ -520,6 +527,43 @@ const generateCase = ({ label, model, settings }: SettingsFixture, baseline: Gen
   tuned: { ...settings, model },
 });
 
+/** An Edit step records itself as FLUX.2 text-to-image with the source first, which Generate recalls as it is. */
+const editCase = ({ label, model, settings }: SettingsFixture, baseline: GenerateWidgetValues): RecallCase => {
+  const caseLabel = `${label} / edit`;
+  const size = { height: settings.height, width: settings.width };
+  const source = { ...size, image_name: 'edit-source.png' };
+  const extra = { height: 256, image_name: 'edit-reference.png', width: 256 };
+  const compilation = compiled(caseLabel, () =>
+    compileEditGraph({
+      model: model as MainModelConfig,
+      projectSettings: PROJECT_SETTINGS,
+      referenceImages: [extra],
+      settings,
+      size,
+      source,
+    })
+  );
+  const record = recordOf(compilation, settings);
+  // The list the settings must hold after recall: the source, then the extra, from the inputs; only the ids are the
+  // record's, which the compiler mints.
+  const recordedIds = (record.ref_images as { id: string }[]).map(({ id }) => id);
+  const referenceImages = [source, extra].map((image, index) => ({
+    config: { image: { original: { image } }, type: 'flux2_reference_image' as const },
+    id: recordedIds[index]!,
+    isEnabled: true,
+  }));
+
+  return {
+    baseline,
+    catalog: recallCatalogFor(model, settings),
+    image: imageOf(settings),
+    label: caseLabel,
+    model,
+    record,
+    tuned: { ...settings, model, referenceImages },
+  };
+};
+
 const canvasCase = (
   { label, model, settings }: SettingsFixture,
   mode: CanvasCompileMode,
@@ -637,6 +681,7 @@ const buildCases = (): RecallCase[] => {
     (fixture, index) => tunedShapes.findIndex((other) => other.model.base === fixture.model.base) === index
   );
   const fixtureFor = (base: string) => firstShapes.find((fixture) => fixture.model.base === base)!;
+  const edit = tunedShapes.filter(({ model }) => model.base === 'flux2').map((fixture) => editCase(fixture, baseline));
   const canvas = firstShapes.flatMap((fixture) =>
     canvasModesFor(fixture.model, fixture.settings).map((mode) => canvasCase(fixture, mode, baseline))
   );
@@ -646,6 +691,7 @@ const buildCases = (): RecallCase[] => {
 
   return [
     ...generate,
+    ...edit,
     ...canvas,
     // The adapter switch is on by default, so only a panel that has it off shows a record turning it on.
     canvasCase(

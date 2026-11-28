@@ -23,6 +23,7 @@ export const FEATURE_PUBLIC_INTERFACES: Readonly<Record<string, readonly string[
     'canvasProcessingSize',
     'components',
     'contracts',
+    'editGraph',
     'graph',
     'graphExport',
     'preview',

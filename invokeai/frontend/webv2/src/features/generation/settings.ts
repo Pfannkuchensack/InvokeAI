@@ -70,6 +70,7 @@ export {
   getGenerateInvocationIssues,
   getGenerationModelAvailabilityReasons,
   getGenerationUiPolicy,
+  getInstructionEditSupport,
   getNegativePromptUsage,
   getPromptHistoryRecallPatch,
   getReferenceImageRoom,

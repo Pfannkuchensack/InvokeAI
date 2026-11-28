@@ -151,6 +151,15 @@
         "klein-9b-standalone": [
           "qwen3EncoderModel",
           "vae"
+        ],
+        "edit-dev-diffusers": [],
+        "edit-dev-standalone": [
+          "mistralEncoderModel",
+          "vae"
+        ],
+        "edit-klein-9b-standalone": [
+          "qwen3EncoderModel",
+          "vae"
         ]
       },
       "nodeTypes": [
@@ -774,6 +783,9 @@
         "dype_scale": [
           3
         ],
+        "edit_source_image_name": [
+          "edit-source.png"
+        ],
         "flux3_prompt_upsampler": [],
         "generation_mode": [
           "anima_txt2img",
@@ -781,6 +793,7 @@
           "ernie_image_txt2img",
           "flux_outpaint",
           "flux_txt2img",
+          "flux2_edit",
           "flux2_txt2img",
           "flux3_txt2img",
           "ideogram4_txt2img",

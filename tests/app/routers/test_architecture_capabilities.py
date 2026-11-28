@@ -91,3 +91,13 @@ def test_the_rows_are_ordered_stably(client: TestClient) -> None:
     rows = client.get(URL).json()
     bases = [r["base"] for r in rows]
     assert bases == sorted(bases)
+
+
+def test_instruction_edit_is_served_for_flux2_and_null_elsewhere(client: TestClient) -> None:
+    rows = client.get(URL).json()
+    served = {(r["base"], r["variant"]): r["features"]["instruction_edit"] for r in rows}
+
+    flux2_rows = {key: value for key, value in served.items() if key[0] == "flux2"}
+    assert flux2_rows
+    assert all(value == {"requires_variant": None, "img2img_start": False} for value in flux2_rows.values())
+    assert all(value is None for (base, _), value in served.items() if base != "flux2")

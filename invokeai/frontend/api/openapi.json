@@ -22494,6 +22494,17 @@
             "description": "If true, reference images are read by the Qwen3-VL vision tower: the effective encoder (the model's own or a standalone one) must carry one.",
             "default": false
           },
+          "instruction_edit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InstructionEdit"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null unless the architecture has instruction-edit models."
+          },
           "supports_regional_guidance": {
             "type": "boolean",
             "title": "Supports Regional Guidance",
@@ -32252,6 +32263,7 @@
                   "flux2_img2img",
                   "flux2_inpaint",
                   "flux2_outpaint",
+                  "flux2_edit",
                   "sd3_txt2img",
                   "sd3_img2img",
                   "sd3_inpaint",
@@ -58054,6 +58066,31 @@
         "enum": ["waiting", "downloading", "downloads_done", "running", "paused", "completed", "error", "cancelled"],
         "title": "InstallStatus",
         "description": "State of an install job running in the background."
+      },
+      "InstructionEdit": {
+        "properties": {
+          "requires_variant": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requires Variant",
+            "description": "If set, only models of this variant edit; null means every variant does."
+          },
+          "img2img_start": {
+            "type": "boolean",
+            "title": "Img2Img Start",
+            "description": "Whether denoising starts from the noised source latent; false means it starts from noise."
+          }
+        },
+        "type": "object",
+        "required": ["img2img_start"],
+        "title": "InstructionEdit",
+        "description": "The model edits a source image from a text instruction; the source is reference image #1."
       },
       "IntegerBatchInvocation": {
         "category": "batch",

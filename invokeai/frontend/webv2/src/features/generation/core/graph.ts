@@ -207,30 +207,19 @@ const addFluxReduxReferenceImages = (
   return collector;
 };
 
-const addFluxKontextReferenceImages = (
+/** Chains one `flux_kontext` conditioning per image, in order, into the denoise's `kontext_conditioning`. */
+export const addFluxKontextImages = (
   graph: BackendGraphContract,
-  settings: GenerateSettings,
+  imageNames: readonly string[],
   denoise: BackendInvocationContract,
   type: 'flux2_reference_image' | 'flux_kontext_reference_image'
 ): BackendInvocationContract | null => {
-  const refs = getEnabledReferenceImages(settings.referenceImages, type);
-
-  if (refs.length === 0) {
-    return null;
-  }
-
   let prevCollect: BackendInvocationContract | null = null;
 
-  for (const ref of refs) {
-    const { image } = ref.config;
-
-    if (!image) {
-      continue;
-    }
-
+  for (const imageName of imageNames) {
     const kontext = addNode(graph, {
       id: createId('flux_kontext'),
-      image: toImageField(image),
+      image: { image_name: imageName },
       type: 'flux_kontext',
     });
     const collect = addNode(graph, {
@@ -251,6 +240,21 @@ const addFluxKontextReferenceImages = (
 
   return prevCollect;
 };
+
+const addFluxKontextReferenceImages = (
+  graph: BackendGraphContract,
+  settings: GenerateSettings,
+  denoise: BackendInvocationContract,
+  type: 'flux2_reference_image' | 'flux_kontext_reference_image'
+): BackendInvocationContract | null =>
+  addFluxKontextImages(
+    graph,
+    getEnabledReferenceImages(settings.referenceImages, type).flatMap(({ config: { image } }) =>
+      image ? [toImageField(image).image_name] : []
+    ),
+    denoise,
+    type
+  );
 
 const getDiffusersSource = (
   settings: Pick<GenerateSettings, 'componentSourceModel'>,
@@ -1004,7 +1008,7 @@ const buildFluxGraph: GenerateGraphBuilder = (settings, model, outputIsIntermedi
   return { ...pipeline, conditioning: { ...pipeline.conditioning, fluxReduxCollector, ipAdapterCollector } };
 };
 
-const buildFlux2Pipeline = (input: FamilyPipelineInput, extras: PipelineExtras = {}) => {
+export const buildFlux2Pipeline = (input: FamilyPipelineInput, extras: PipelineExtras = {}) => {
   const { model, settings } = input;
   const isDev = model.variant === 'dev';
   const sourceModel = getFlux2ComponentSource(model, settings);
@@ -1120,20 +1124,29 @@ const buildFlux2Pipeline = (input: FamilyPipelineInput, extras: PipelineExtras =
   };
 };
 
+/** The encoder, scheduler and VAE records a FLUX.2 graph writes into its metadata. */
+export const getFlux2PipelineMetadata = (
+  model: MainModelConfig,
+  settings: Pick<GenerateSettings, 'scheduler'>,
+  { components, vaeModel }: Pick<ReturnType<typeof buildFlux2Pipeline>, 'components' | 'vaeModel'>
+) => ({
+  ...(model.variant === 'dev'
+    ? { mistral_encoder: components.mistralEncoderModel ?? undefined }
+    : { qwen3_encoder: components.qwen3EncoderModel ?? undefined, qwen3_source: components.sourceModel }),
+  scheduler: coerceSchedulerForGraph(model, settings.scheduler),
+  vae: vaeModel ?? undefined,
+});
+
 const buildFlux2Graph: GenerateGraphBuilder = (settings, model, outputIsIntermediate, projectSettings) => {
   const pipeline = buildFlux2Pipeline(
     toGeneratePipelineInput(settings, model, outputIsIntermediate, projectSettings, getDenoiseSize(settings, model)),
     { decode: getGenerateDecode(settings, model, outputIsIntermediate) }
   );
-  const { components, denoise, graph, output, vaeModel } = pipeline;
+  const { denoise, graph, output } = pipeline;
 
   addFluxKontextReferenceImages(graph, settings, denoise, 'flux2_reference_image');
   addMetadata(graph, output, settings, model, 'flux2_txt2img', projectSettings, {
-    ...(model.variant === 'dev'
-      ? { mistral_encoder: components.mistralEncoderModel ?? undefined }
-      : { qwen3_encoder: components.qwen3EncoderModel ?? undefined, qwen3_source: components.sourceModel }),
-    scheduler: coerceSchedulerForGraph(model, settings.scheduler),
-    vae: vaeModel ?? undefined,
+    ...getFlux2PipelineMetadata(model, settings, pipeline),
     ...(shouldUsePidDecode(settings, model.base) ? getPidMetadata(settings) : {}),
   });
   addReferenceImageMetadata(graph, settings);

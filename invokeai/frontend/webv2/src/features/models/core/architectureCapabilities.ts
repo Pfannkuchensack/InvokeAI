@@ -25,6 +25,13 @@ export interface ArchitectureCapabilitiesRow {
     max_reference_images: number;
     reference_images_require_variant: string | null;
     reference_images_require_vision_tower: boolean;
+    /** Null unless the architecture has instruction-edit models. */
+    instruction_edit: {
+      /** Only models of this variant edit; null means every variant of the architecture does. */
+      requires_variant: string | null;
+      /** Whether denoising starts from the noised source latent; false starts from noise. */
+      img2img_start: boolean;
+    } | null;
     supports_regional_guidance: boolean;
     regional_negative: boolean;
     clip_skip_max: number | null;
@@ -55,7 +62,33 @@ export interface ArchitectureCapabilitiesRow {
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
 
-/** Rejects a row whose blocks readers dereference, so a malformed table is never published. */
+/** The schema marks both the block and its `requires_variant` optional (pydantic defaults), so absent reads as null. */
+const isInstructionEdit = (value: unknown): boolean =>
+  value === undefined ||
+  value === null ||
+  (isObject(value) &&
+    typeof value.img2img_start === 'boolean' &&
+    (value.requires_variant === undefined ||
+      value.requires_variant === null ||
+      typeof value.requires_variant === 'string'));
+
+const withInstructionEditDefaults = (row: ArchitectureCapabilitiesRow): ArchitectureCapabilitiesRow => {
+  const edit = row.features.instruction_edit as Partial<NonNullable<typeof row.features.instruction_edit>> | undefined;
+
+  if (edit === null || (edit !== undefined && edit.requires_variant !== undefined)) {
+    return row;
+  }
+
+  return {
+    ...row,
+    features: {
+      ...row.features,
+      instruction_edit: edit === undefined ? null : { img2img_start: edit.img2img_start!, requires_variant: null },
+    },
+  };
+};
+
+/** Rejects a row whose blocks readers dereference, so a malformed table is never published; fills schema defaults. */
 const assertRow = (row: ArchitectureCapabilitiesRow): ArchitectureCapabilitiesRow => {
   const value: unknown = row;
   const isValid =
@@ -63,6 +96,7 @@ const assertRow = (row: ArchitectureCapabilitiesRow): ArchitectureCapabilitiesRo
     typeof value.base === 'string' &&
     (value.variant === null || typeof value.variant === 'string') &&
     isObject(value.features) &&
+    isInstructionEdit(value.features.instruction_edit) &&
     (value.defaults === null || isObject(value.defaults)) &&
     (value.vae === null || (isObject(value.vae) && Array.isArray(value.vae.accepted)));
 
@@ -70,7 +104,7 @@ const assertRow = (row: ArchitectureCapabilitiesRow): ArchitectureCapabilitiesRo
     throw new TypeError(`Malformed architecture capabilities row: ${JSON.stringify(value)}`);
   }
 
-  return row;
+  return withInstructionEditDefaults(row);
 };
 
 const key = (base: string, variant: string | null): string => `${base}\u0000${variant ?? ''}`;
@@ -92,14 +126,15 @@ export const getArchitectureCapabilitiesRevision = (): number => revision;
 
 /** Called by `data/` once the table has been fetched. Throws, publishing nothing, on a malformed row. */
 export const setArchitectureCapabilities = (next: readonly ArchitectureCapabilitiesRow[]): void => {
-  const nextByKey = new Map(next.map((row) => [key(assertRow(row).base, row.variant), row]));
+  const checked = next.map(assertRow);
+  const nextByKey = new Map(checked.map((row) => [key(row.base, row.variant), row]));
   const nextByBase = new Map<string, ArchitectureCapabilitiesRow[]>();
 
-  for (const row of next) {
+  for (const row of checked) {
     nextByBase.set(row.base, [...(nextByBase.get(row.base) ?? []), row]);
   }
 
-  rows = next;
+  rows = checked;
   byKey = nextByKey;
   byBase = nextByBase;
   revision += 1;

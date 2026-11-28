@@ -2143,6 +2143,27 @@ const getReferenceImageLimit = (model: GenerateModelConfig | undefined): number 
   return getArchitectureFeatures(model.base)?.max_reference_images ?? DEFAULT_REFERENCE_IMAGE_LIMIT;
 };
 
+/**
+ * What an instruction-edit model needs from the Edit pipeline, or null for a model that does not edit: the base declares
+ * `instruction_edit` and, where it names a variant, the model is that variant. The source image is reference #1, so
+ * `maxReferenceImages` counts it.
+ */
+export const getInstructionEditSupport = (
+  model: GenerateModelConfig | undefined
+): { img2imgStart: boolean; maxReferenceImages: number } | null => {
+  if (!model || model.type === 'external_image_generator') {
+    return null;
+  }
+
+  const edit = getArchitectureFeatures(model.base, model.variant)?.instruction_edit;
+
+  if (!edit || (edit.requires_variant !== null && model.variant !== edit.requires_variant)) {
+    return null;
+  }
+
+  return { img2imgStart: edit.img2img_start, maxReferenceImages: getReferenceImageLimit(model) };
+};
+
 export type ReferenceImageRefusal = 'full' | 'unsupported' | ReferenceImageUnavailableReason;
 
 export interface ReferenceImageRoom {

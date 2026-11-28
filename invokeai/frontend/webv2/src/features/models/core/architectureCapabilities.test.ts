@@ -68,6 +68,48 @@ describe('publishing the table', () => {
     expect(getArchitectureCapabilityRow('sd-1')).toBeUndefined();
   });
 
+  it('serves the instruction-edit block of an editing architecture and null elsewhere', () => {
+    setArchitectureCapabilities(rows);
+
+    expect(getArchitectureFeatures('flux2')?.instruction_edit).toEqual({
+      img2img_start: false,
+      requires_variant: null,
+    });
+    expect(getArchitectureFeatures('flux2', 'dev')?.instruction_edit).toEqual({
+      img2img_start: false,
+      requires_variant: null,
+    });
+    expect(getArchitectureFeatures('sd-1')?.instruction_edit).toBeNull();
+  });
+
+  it('reads an absent instruction-edit block, or an absent variant requirement, as null', () => {
+    const flux2 = rows.find((row) => row.base === 'flux2' && row.variant === null)!;
+    const withEdit = (instructionEdit: unknown) =>
+      ({ ...flux2, features: { ...flux2.features, instruction_edit: instructionEdit } }) as ArchitectureCapabilitiesRow;
+    const held = (instructionEdit: unknown) => {
+      setArchitectureCapabilities([withEdit(instructionEdit)]);
+
+      return getArchitectureFeatures('flux2')?.instruction_edit;
+    };
+
+    expect(held(undefined)).toBeNull();
+    expect(held({ img2img_start: true })).toEqual({ img2img_start: true, requires_variant: null });
+    expect(held({ img2img_start: false, requires_variant: 'dev' })).toEqual({
+      img2img_start: false,
+      requires_variant: 'dev',
+    });
+  });
+
+  it('rejects a row whose instruction-edit block is malformed', () => {
+    const flux2 = rows.find((row) => row.base === 'flux2' && row.variant === null)!;
+    const withEdit = (instructionEdit: unknown) =>
+      ({ ...flux2, features: { ...flux2.features, instruction_edit: instructionEdit } }) as ArchitectureCapabilitiesRow;
+
+    expect(() => setArchitectureCapabilities([withEdit({ requires_variant: null })])).toThrow();
+    expect(() => setArchitectureCapabilities([withEdit({ img2img_start: true, requires_variant: 3 })])).toThrow();
+    expect(() => setArchitectureCapabilities([withEdit('edit')])).toThrow();
+  });
+
   it('keeps the previous table intact when a later push is malformed', () => {
     setArchitectureCapabilities(rows);
     const revision = getArchitectureCapabilitiesRevision();

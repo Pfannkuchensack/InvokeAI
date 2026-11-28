@@ -3,6 +3,7 @@ import type { ProjectWorkflowCollection } from '@workbench/projectWorkflows';
 import type { LayeredSettingKey } from '@workbench/settings/projectSettings';
 
 import { stripInfiniteWindowAnchor, stripSessionScopedGallerySearch } from '@features/gallery/contracts';
+import { toStoredEditTreeValue } from '@workbench/projectEditTree';
 import { migrateProjectGraphToCollection, normalizeProjectWorkflowCollection } from '@workbench/projectWorkflows';
 import { getLayeredSettings } from '@workbench/settings/projectSettings';
 
@@ -32,6 +33,8 @@ export type ProjectDocumentV3 = Omit<
   'floatingWidgets' | 'lastFloatingGeometry' | 'presetWorkingLayouts'
 > & {
   documentSchemaVersion: typeof PROJECT_DOCUMENT_SCHEMA_VERSION;
+  /** Optional and additive, so schema 3 holds: absent means no Edit history. Unvalidated here; see `projectEditTree.ts`. */
+  editTree?: unknown;
   floatingWidgets?: Project['floatingWidgets'];
   lastFloatingGeometry?: Project['lastFloatingGeometry'];
   /** Optional and additive, so schema 3 holds: a build that predates it ignores it and leaves it out of its next save. */
@@ -74,6 +77,7 @@ export const serializeProjectDocumentV3 = (project: Project): ProjectDocumentV3 
   const document: ProjectDocumentV3 = {
     canvas: persistent.canvas,
     documentSchemaVersion: PROJECT_DOCUMENT_SCHEMA_VERSION,
+    ...(persistent.editTree ? { editTree: toStoredEditTreeValue(persistent.editTree) } : {}),
     ...(persistent.floatingWidgets ? { floatingWidgets: persistent.floatingWidgets } : {}),
     id: persistent.id,
     invocation: persistent.invocation,
@@ -115,6 +119,7 @@ export const serializeProjectDocument = (project: Project): Record<string, unkno
 
   return {
     ...document,
+    ...(document.editTree ? { editTree: toStoredEditTreeValue(document.editTree) } : {}),
     documentSchemaVersion: PROJECT_DOCUMENT_SCHEMA_VERSION,
     settingsLayering: SETTINGS_LAYERING_VERSION,
   };

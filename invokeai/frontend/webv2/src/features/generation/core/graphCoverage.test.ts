@@ -14,6 +14,7 @@ import {
   SUPPORTED_GENERATE_BASES,
 } from './baseGenerationPolicies';
 import { compileCanvasGraph } from './canvas/compileCanvasGraph';
+import { compileEditGraph } from './edit/compileEditGraph';
 import { compileGenerateGraph, GRAPH_BUILDERS } from './graph';
 import {
   buildContext,
@@ -211,6 +212,28 @@ const krea2EditCase = () => {
   };
 };
 
+/** The instruction-edit graph for every FLUX.2 model shape, with the source and one further reference. */
+const editCases = () =>
+  generateGraphCases
+    .filter(({ base }) => base === 'flux2')
+    .map(({ base, shape }) => {
+      const { filled, model, settings } = satisfiedSettingsFor(base, { ...shape, label: `edit-${shape.label}` });
+
+      return {
+        base,
+        filled,
+        graph: compileEditGraph({
+          model,
+          projectSettings: { useCpuNoise: true, useNsfwChecker: false, useWatermark: false },
+          referenceImages: [{ height: 512, image_name: 'edit-reference.png', width: 512 }],
+          settings,
+          size: { height: 1024, width: 1024 },
+          source: { height: 512, image_name: 'edit-source.png', width: 512 },
+        }).backendGraph,
+        shape: { ...shape, label: `edit-${shape.label}` },
+      };
+    });
+
 seedArchitectureCapabilities();
 
 describe('generate graph coverage', () => {
@@ -372,6 +395,7 @@ describe('generate graph coverage', () => {
       sdxlCanvasCase(true),
       fluxFillCanvasCase(),
       krea2EditCase(),
+      ...editCases(),
     ];
 
     for (const { base, filled, graph, shape } of compilations) {

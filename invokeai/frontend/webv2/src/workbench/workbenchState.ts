@@ -126,6 +126,7 @@ import {
   type CanvasProjectMutation,
 } from './canvasProjectMutations';
 import { gateProjectCanvases } from './projectCanvasGate';
+import { readStoredEditTree } from './projectEditTree';
 import {
   addProjectWorkflow,
   applyProjectWorkflowAction,
@@ -2192,6 +2193,7 @@ const assembleWorkbenchProject = (
 ): Project => {
   const { isArriving = true } = options;
   const {
+    editTree: storedEditTree,
     graphHistory: _graphHistory,
     projectGraph: legacyProjectGraph,
     recoveredAt: _recoveredAt,
@@ -2317,9 +2319,13 @@ const assembleWorkbenchProject = (
     (instanceId) => Object.hasOwn(widgetInstances, instanceId)
   );
 
+  // A tree this build cannot read stays as stored, so the next save writes it back instead of erasing it.
+  const editTree = readStoredEditTree(storedEditTree);
+
   return {
     ...persistentProject,
     canvas,
+    ...(editTree === undefined ? {} : { editTree }),
     events: isArriving ? [] : project.events.slice(0, PROJECT_EVENT_LIMIT),
     floatingWidgets: placement.floatingWidgets,
     lastFloatingGeometry: normalizeLastFloatingGeometry(

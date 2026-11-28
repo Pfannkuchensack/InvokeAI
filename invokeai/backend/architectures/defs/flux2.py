@@ -2,7 +2,7 @@
 
 from invokeai.backend.architectures.facets.conditioning import ConditioningFacet
 from invokeai.backend.architectures.facets.default_settings import DefaultSettingsFacet
-from invokeai.backend.architectures.facets.features import FeaturesFacet, NegativePrompt
+from invokeai.backend.architectures.facets.features import FeaturesFacet, InstructionEditFacet, NegativePrompt
 from invokeai.backend.architectures.facets.latent_space import FLUX2_32, LatentSpaceFacet
 from invokeai.backend.architectures.facets.modality import ModalityFacet
 from invokeai.backend.architectures.facets.variant import VariantFacet
@@ -33,7 +33,7 @@ register(
             None: MainModelDefaultSettings(scheduler="euler", steps=4, cfg_scale=1.0, width=1024, height=1024),
         }
     ),
-    ModalityFacet(frozenset({"txt2img", "img2img", "inpaint", "outpaint"}), metadata_slug="flux2"),
+    ModalityFacet(frozenset({"txt2img", "img2img", "inpaint", "outpaint", "edit"}), metadata_slug="flux2"),
     FeaturesFacet(
         negative_prompt=NegativePrompt(visible=False, usage="never"),
         dimension_grid=16,
@@ -46,6 +46,8 @@ register(
         # The Fun-ControlNet-Union is FLUX.2 [dev]'s; `flux2_denoise` refuses it on Klein.
         control_kinds=frozenset({"flux2_control"}),
         max_reference_images=5,
+        # Every FLUX.2 variant edits through its reference images, the source being #1; denoising starts from noise.
+        instruction_edit=InstructionEditFacet(requires_variant=None, img2img_start=False),
         supports_regional_guidance=True,
     ),
     VariantFacet(

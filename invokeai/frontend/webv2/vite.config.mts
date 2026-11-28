@@ -122,6 +122,7 @@ const ROUTE_SHARED_MODULES = [
   '/workbench/projects/invk/format.ts',
   '/workbench/projects/library.ts',
   '/workbench/projects/projectAssets.ts',
+  '/workbench/projectEditTree.ts',
   '/workbench/projects/projectHalves.ts',
   '/workbench/projects/projectFile.ts',
   '/workbench/projects/projectFileErrors.ts',
