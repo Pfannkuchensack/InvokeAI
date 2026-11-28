@@ -166,7 +166,7 @@ export const buildGraphPreviewSource = ({
   templates,
 }: GraphPreviewSourceDeps): GraphPreviewSourceState => {
   const destinationLabel = getDestinationLabel(
-    surface.sourceId === 'video' ? 'gallery' : project.invocation.destination
+    surface.sourceId === 'video' || surface.sourceId === 'instruct' ? 'gallery' : project.invocation.destination
   );
 
   switch (surface.sourceId) {
@@ -176,6 +176,7 @@ export const buildGraphPreviewSource = ({
       return { ...buildGenerateSource(project, projectSettings, models, t), destinationLabel };
     case 'upscale':
     case 'video':
+    case 'instruct':
     case 'canvas':
       return { ...buildWidgetGraphSource(project, surface), destinationLabel };
   }

@@ -69,6 +69,7 @@ import {
   takesReferenceImages,
   getRecallDefaultVae,
   resolveModelDefaultVae,
+  EDIT_FAMILY_INFO,
 } from '@features/generation/settings';
 import { hasArchitectureCapabilities } from '@features/models/architectures';
 import { SEED_MAX } from '@platform/core/seed';
@@ -1503,6 +1504,16 @@ export const isImageRecallKindAvailable = (kind: ImageRecallKind): boolean =>
   kind === 'seed' ||
   kind === 'dimensions' ||
   hasArchitectureCapabilities();
+
+/** The `generation_mode` of every Edit family, as `compileEditGraph` records it. */
+const EDIT_GENERATION_MODES: ReadonlySet<string> = new Set(Object.values(EDIT_FAMILY_INFO).map(({ mode }) => mode));
+
+/** The image an Edit workspace step ran from; null for every other record. Recall of these goes to Edit. */
+export const getEditRecallSourceName = (metadata: unknown): string | null => {
+  const mode = getString(metadata, 'generation_mode');
+
+  return mode !== null && EDIT_GENERATION_MODES.has(mode) ? getString(metadata, 'edit_source_image_name') : null;
+};
 
 export const getImageRecallCapabilities = ({
   currentValues,

@@ -17,7 +17,7 @@ import { WorkbenchReloadError } from '@workbench/projects/reloadWorkbench';
 import { createWidgetRecovery } from '@workbench/widget-frame/widgetRecoveryStore';
 import { createWidgetImplementationResource } from '@workbench/widgetImplementationResource';
 import i18next from 'i18next';
-import { act, Activity, useState, type ReactNode, type SVGProps } from 'react';
+import { act, Activity, Suspense, useState, type ReactNode, type SVGProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { I18nextProvider, initReactI18next } from 'react-i18next';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -539,4 +539,50 @@ describe('shared widget recovery', () => {
       toast.mockRestore();
     }
   );
+});
+
+const ActionsContainer = ({ children }: { children: ReactNode }) => (
+  <div data-testid="actions-container">{children}</div>
+);
+
+describe('hoisted actions chrome container', () => {
+  const renderActions = async (implementation: WidgetImplementation) => {
+    const { resolve, widget } = createDeferredWidget();
+    Object.assign(workbenchMocks.project.widgetInstances, { 'test-instance': createInstance() });
+    await render(
+      <Suspense fallback={null}>
+        <WidgetChromeSlotById container={ActionsContainer} instanceId="test-instance" slot="actions" widget={widget} />
+      </Suspense>
+    );
+    await resolve(implementation);
+    await act(async () => {
+      await Promise.resolve();
+    });
+  };
+
+  afterEach(() => {
+    delete (workbenchMocks.project.widgetInstances as Record<string, unknown>)['test-instance'];
+  });
+
+  it('renders no container for a widget with no actions in the region', async () => {
+    await renderActions({ view: FocusableView });
+
+    expect(host!.querySelector('[data-testid="actions-container"]')).toBeNull();
+    expect(host!.querySelector('button')).toBeNull();
+  });
+
+  it('keeps a failing actions slot inside the container, so its retry chip stays in the chrome', async () => {
+    const Throwing = () => {
+      throw new Error('actions exploded');
+    };
+    await renderActions({ headerActions: Throwing, view: FocusableView });
+
+    expect(host!.querySelector('[data-testid="actions-container"] [data-testid="widget-failure"]')).not.toBeNull();
+  });
+
+  it('wraps the controls of a widget that has actions', async () => {
+    await renderActions({ headerActions: FocusableView, view: FocusableView });
+
+    expect(host!.querySelector('[data-testid="actions-container"] button')?.textContent).toBe('Loaded control');
+  });
 });

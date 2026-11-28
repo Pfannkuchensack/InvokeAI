@@ -5,6 +5,7 @@ import { LivePreviewFollowProvider } from '@workbench/widgets/preview/livePrevie
 
 import { GalleryUiAdapterProvider } from './GalleryUiAdapter';
 import { GenerationUiAdapterProvider } from './GenerationUiAdapter';
+import { InstructUiAdapterProvider } from './InstructUiAdapter';
 import { ModelsUiAdapterProvider } from './ModelsUiAdapter';
 import { QueueUiAdapterProvider } from './QueueUiAdapter';
 import { UpscaleUiAdapterProvider } from './UpscaleUiAdapter';
@@ -19,8 +20,9 @@ export const workbenchUiPortProviders: ReadonlyArray<ProviderComponent> = [
   GenerationUiAdapterProvider,
   UpscaleUiAdapterProvider,
   VideoUiAdapterProvider,
+  InstructUiAdapterProvider,
   WorkflowUiAdapterProvider,
 ];
 
-/** All seven feature UI ports, composed once at module scope (identity must be render-stable). */
+/** All eight feature UI ports, composed once at module scope (identity must be render-stable). */
 export const WorkbenchUiPorts = composeProviders(workbenchUiPortProviders);

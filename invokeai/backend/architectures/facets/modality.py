@@ -23,6 +23,7 @@ GenerationModeKind = Literal[
     "img2img",
     "inpaint",
     "outpaint",
+    "edit",
     "t2v",
     "i2v",
     "lf2v",
@@ -39,7 +40,8 @@ GenerationModeKind = Literal[
 (first and last frame to video), `interpolate` (between two given images), `extend_video`
 (continue an existing clip), `ref2v` (video from a set of image and video references) and `a2v`
 (picture for an existing soundtrack). `v2a` is the one video mode that produces *sound* rather than
-picture: it takes a clip and generates the soundtrack for it. The rest produce images."""
+picture: it takes a clip and generates the soundtrack for it. `edit` is instruction editing of a source image. The rest
+produce images."""
 
 
 @dataclass(frozen=True)

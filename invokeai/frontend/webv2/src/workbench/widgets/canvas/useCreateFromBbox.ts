@@ -9,6 +9,7 @@ import {
   getCreateFromBboxNotice,
   type CreateFromBboxDestination,
 } from '@workbench/canvas-operations/api';
+import { hasUnreadableEditHistory, openImageInEdit } from '@workbench/editEntry';
 import { appendReferenceImage } from '@workbench/image-actions/appendReferenceImage';
 import { useNotify } from '@workbench/useNotify';
 import { useOpenWorkbenchWidget } from '@workbench/useOpenWorkbenchWidget';
@@ -32,7 +33,7 @@ export const useCreateFromBbox = (
   const { t } = useTranslation();
   const notify = useNotify();
   const queries = useWorkbenchQueries();
-  const { canvas, generation, notifications } = useWorkbenchCommands();
+  const { canvas, generation, layout, notifications, widgets } = useWorkbenchCommands();
   const openWorkbenchWidget = useOpenWorkbenchWidget();
   const models = useModelsSelector((snapshot) => snapshot.models);
   const isCreating = creatingProjects.useValue(engine?.projectId ?? '') === true;
@@ -45,6 +46,13 @@ export const useCreateFromBbox = (
     async (destination: CreateFromBboxDestination): Promise<void> => {
       const project = queries.getSnapshot().activeProject;
       if (creatingProjects.get(project.id)) {
+        return;
+      }
+
+      // Checked before the frame is uploaded: a history this version cannot read is never started over.
+      if (destination === 'edit' && hasUnreadableEditHistory(queries.getProject(project.id))) {
+        notify.info(t('widgets.instruct.historyUnreadable'));
+
         return;
       }
 
@@ -64,6 +72,20 @@ export const useCreateFromBbox = (
           if (result.status === 'uploaded') {
             const latestProject = queries.getProject(project.id);
             if (!latestProject) {
+              return;
+            }
+
+            if (destination === 'edit') {
+              // The Edit view starts the history from the frame, or asks first when it holds another one.
+              openImageInEdit(
+                {
+                  commands: { layout, widgets },
+                  getProject: queries.getProject,
+                  isActiveProject: queries.isActiveProject,
+                  projectId: project.id,
+                },
+                { height: result.image.height, image_name: result.image.imageName, width: result.image.width }
+              );
               return;
             }
 
@@ -109,7 +131,7 @@ export const useCreateFromBbox = (
         }
       });
     },
-    [canvas, engine, generation, models, notifications, notify, openWorkbenchWidget, queries, t]
+    [canvas, engine, generation, layout, models, notifications, notify, openWorkbenchWidget, queries, t, widgets]
   );
 
   return { createFromBbox, isCreating };

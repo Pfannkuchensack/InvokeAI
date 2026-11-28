@@ -207,30 +207,19 @@ const addFluxReduxReferenceImages = (
   return collector;
 };
 
-const addFluxKontextReferenceImages = (
+/** Chains one `flux_kontext` conditioning per image, in order, into the denoise's `kontext_conditioning`. */
+export const addFluxKontextImages = (
   graph: BackendGraphContract,
-  settings: GenerateSettings,
+  imageNames: readonly string[],
   denoise: BackendInvocationContract,
   type: 'flux2_reference_image' | 'flux_kontext_reference_image'
 ): BackendInvocationContract | null => {
-  const refs = getEnabledReferenceImages(settings.referenceImages, type);
-
-  if (refs.length === 0) {
-    return null;
-  }
-
   let prevCollect: BackendInvocationContract | null = null;
 
-  for (const ref of refs) {
-    const { image } = ref.config;
-
-    if (!image) {
-      continue;
-    }
-
+  for (const imageName of imageNames) {
     const kontext = addNode(graph, {
       id: createId('flux_kontext'),
-      image: toImageField(image),
+      image: { image_name: imageName },
       type: 'flux_kontext',
     });
     const collect = addNode(graph, {
@@ -251,6 +240,21 @@ const addFluxKontextReferenceImages = (
 
   return prevCollect;
 };
+
+const addFluxKontextReferenceImages = (
+  graph: BackendGraphContract,
+  settings: GenerateSettings,
+  denoise: BackendInvocationContract,
+  type: 'flux2_reference_image' | 'flux_kontext_reference_image'
+): BackendInvocationContract | null =>
+  addFluxKontextImages(
+    graph,
+    getEnabledReferenceImages(settings.referenceImages, type).flatMap(({ config: { image } }) =>
+      image ? [toImageField(image).image_name] : []
+    ),
+    denoise,
+    type
+  );
 
 const getDiffusersSource = (
   settings: Pick<GenerateSettings, 'componentSourceModel'>,
@@ -994,7 +998,7 @@ const buildFluxGraph: GenerateGraphBuilder = (settings, model, outputIsIntermedi
   return { ...pipeline, conditioning: { ...pipeline.conditioning, fluxReduxCollector, ipAdapterCollector } };
 };
 
-const buildFlux2Pipeline = (input: FamilyPipelineInput, extras: PipelineExtras = {}) => {
+export const buildFlux2Pipeline = (input: FamilyPipelineInput, extras: PipelineExtras = {}) => {
   const { model, settings } = input;
   const isDev = model.variant === 'dev';
   const sourceModel = getFlux2ComponentSource(model, settings);
@@ -1110,6 +1114,18 @@ const buildFlux2Pipeline = (input: FamilyPipelineInput, extras: PipelineExtras =
   };
 };
 
+/**
+ * The metadata a FLUX.2 graph adds beyond what `addMetadata` records from its loader nodes. The `_pipeline` argument
+ * keeps call sites that pass the built pipeline compiling.
+ */
+export const getFlux2PipelineMetadata = (
+  model: MainModelConfig,
+  settings: Pick<GenerateSettings, 'scheduler'>,
+  _pipeline?: unknown
+) => ({
+  scheduler: coerceSchedulerForGraph(model, settings.scheduler),
+});
+
 const buildFlux2Graph: GenerateGraphBuilder = (settings, model, outputIsIntermediate, projectSettings) => {
   const pipeline = buildFlux2Pipeline(
     toGeneratePipelineInput(settings, model, outputIsIntermediate, projectSettings, getDenoiseSize(settings, model)),
@@ -1119,7 +1135,7 @@ const buildFlux2Graph: GenerateGraphBuilder = (settings, model, outputIsIntermed
 
   addFluxKontextReferenceImages(graph, settings, denoise, 'flux2_reference_image');
   addMetadata(graph, output, settings, model, 'flux2_txt2img', projectSettings, {
-    scheduler: coerceSchedulerForGraph(model, settings.scheduler),
+    ...getFlux2PipelineMetadata(model, settings, pipeline),
     ...(shouldUsePidDecode(settings, model.base) ? getPidMetadata(settings) : {}),
   });
   addReferenceImageMetadata(graph, settings);
@@ -1252,7 +1268,7 @@ interface QwenImagePipelineExtras extends PipelineExtras {
   encoderFields?: Record<string, unknown>;
 }
 
-const buildQwenImagePipeline = (input: FamilyPipelineInput, extras: QwenImagePipelineExtras = {}) => {
+export const buildQwenImagePipeline = (input: FamilyPipelineInput, extras: QwenImagePipelineExtras = {}) => {
   const { model, settings } = input;
   const sourceModel = getCompatibleComponentSource(settings, model);
   const hasBundledComponents = model.format === 'diffusers' || sourceModel;
@@ -1327,6 +1343,8 @@ const buildQwenImagePipeline = (input: FamilyPipelineInput, extras: QwenImagePip
     graph,
     latents: { encodeType: QWEN_IMAGE_ENCODE_TYPE, vae: { field: 'vae', node: modelLoader } },
     layoutPrompt: null,
+    modelLoader,
+    negativeEncoder: negCond,
     output,
     positiveEncoder: posCond,
   };
@@ -1853,18 +1871,20 @@ const buildKrea2Graph: GenerateGraphBuilder = (settings, model, outputIsIntermed
   return pipeline;
 };
 
-const buildQwenImage21Graph = (
-  settings: GenerateSettings,
-  model: MainModelConfig,
-  outputIsIntermediate: boolean,
-  projectSettings: GenerationProjectSettings
-): FamilyGraph => {
+interface QwenImage21PipelineExtras {
+  /** The GGUF encoder's vision tower for references; the loader refuses one beside any other encoder. */
+  visionTower?: ComponentModelConfig | null;
+}
+
+/** Prompts, loader, LoRAs, denoise and decode of Qwen-Image 2.1; references and metadata are the caller's. */
+export const buildQwenImage21Pipeline = (input: FamilyPipelineInput, extras: QwenImage21PipelineExtras = {}) => {
+  const { model, settings } = input;
   // For single-file and GGUF transformers the generation policy requires VAE and encoder before this runs.
   const vaeModel = getCompatibleVae(settings, model);
   const qwen3VlEncoderModel = getCompatibleComponent(settings.qwen3VLEncoderModel, isQwen3Vl8bEncoder);
   const qwen3VlVisionTowerModel =
     qwen3VlEncoderModel && isGgufQwen3Vl8bEncoder(qwen3VlEncoderModel)
-      ? getCompatibleComponent(settings.qwen3VLVisionTowerModel, isQwen3Vl8bVisionTower)
+      ? getCompatibleComponent(extras.visionTower ?? null, isQwen3Vl8bVisionTower)
       : null;
 
   const graph: BackendGraphContract = { edges: [], id: createId('qwen_image_2_1_graph'), nodes: {} };
@@ -1889,13 +1909,13 @@ const buildQwenImage21Graph = (
   const negCond = useCfg ? addNode(graph, { id: 'neg_cond', type: 'qwen_image_2_1_text_encoder' }) : null;
   const denoise = addNode(graph, {
     cfg_scale: settings.cfgScale,
-    height: settings.height,
+    height: input.denoiseSize.height,
     id: 'denoise_latents',
     steps: settings.steps,
     type: 'qwen_image_2_1_denoise',
-    width: settings.width,
+    width: input.denoiseSize.width,
   });
-  const output = addImageOutputNode(graph, 'qwen_image_2_1_l2i', outputIsIntermediate);
+  const output = addPipelineOutputNode(graph, input, 'qwen_image_2_1_l2i', { tiles: false });
 
   addEdge(graph, loraSource, 'transformer', denoise, 'transformer');
   addEdge(graph, modelLoader, 'qwen3_vl_encoder', posCond, 'qwen3_vl_encoder');
@@ -1909,52 +1929,69 @@ const buildQwenImage21Graph = (
   }
   addEdge(graph, seed, 'value', denoise, 'seed');
   addEdge(graph, denoise, 'latents', output, 'latents');
-  addQwenImage21ReferenceImages(graph, settings, {
+
+  return {
+    components: { qwen3VlEncoderModel, qwen3VlVisionTowerModel },
+    conditioning: null,
     conditionings: negCond ? [posCond, negCond] : [posCond],
     denoise,
+    denoiseSize: input.denoiseSize,
+    graph,
+    latents: { encodeType: QWEN_IMAGE_2_1_ENCODE_TYPE, vae: { field: 'vae', node: modelLoader } },
+    layoutPrompt: null,
     modelLoader,
-  });
+    output,
+    vaeModel,
+  };
+};
+
+const buildQwenImage21Graph = (
+  settings: GenerateSettings,
+  model: MainModelConfig,
+  outputIsIntermediate: boolean,
+  projectSettings: GenerationProjectSettings
+): FamilyGraph => {
+  const pipeline = buildQwenImage21Pipeline(
+    toGeneratePipelineInput(settings, model, outputIsIntermediate, projectSettings, {
+      height: settings.height,
+      width: settings.width,
+    }),
+    { visionTower: settings.qwen3VLVisionTowerModel }
+  );
+  const { conditionings, denoise, graph, modelLoader, output } = pipeline;
+
+  addQwenImage21ReferenceImages(
+    graph,
+    { conditionings, denoise, modelLoader },
+    getEnabledReferenceImages(settings.referenceImages, 'qwen_image_2_1_reference_image').flatMap(({ config }) =>
+      config.image ? [toImageField(config.image)] : []
+    )
+  );
   // The denoise adds its prefix-cache mode to the record, so metadata passes through it.
   addMetadata(graph, denoise, settings, model, 'qwen_image_2_1_txt2img', projectSettings, {});
   addEdge(graph, denoise, 'metadata', output, 'metadata');
   addReferenceImageMetadata(graph, settings);
 
-  return {
-    conditioning: null,
-    denoise,
-    denoiseSize: { height: denoise.height, width: denoise.width },
-    graph,
-    latents: { encodeType: QWEN_IMAGE_2_1_ENCODE_TYPE, vae: { field: 'vae', node: modelLoader } },
-    layoutPrompt: null,
-  };
+  return pipeline;
 };
 
 /** The encoder sees each reference through its vision tower and the denoise places its latents, in one order. */
-const addQwenImage21ReferenceImages = (
+export const addQwenImage21ReferenceImages = (
   graph: BackendGraphContract,
-  settings: GenerateSettings,
   nodes: {
-    conditionings: BackendInvocationContract[];
+    conditionings: readonly BackendInvocationContract[];
     denoise: BackendInvocationContract;
     modelLoader: BackendInvocationContract;
-  }
+  },
+  images: readonly { image_name: string }[]
 ): void => {
-  const referenceImages = getEnabledReferenceImages(settings.referenceImages, 'qwen_image_2_1_reference_image');
-  if (referenceImages.length === 0) {
-    return;
-  }
-
   let imageCollect: BackendInvocationContract | null = null;
   let latentsCollect: BackendInvocationContract | null = null;
 
-  for (const { config } of referenceImages) {
-    if (!config.image) {
-      continue;
-    }
-
+  for (const image of images) {
     const imageNode = addNode(graph, {
       id: createId('qwen21_ref_img'),
-      image: toImageField(config.image),
+      image: { ...image },
       type: 'image',
     });
     const i2l = addNode(graph, { id: createId('qwen21_ref_i2l'), reference: true, type: QWEN_IMAGE_2_1_ENCODE_TYPE });
@@ -2109,12 +2146,14 @@ const buildMossImageGraph: GenerateGraphBuilder = (settings, model, outputIsInte
   return { ...pipeline, layoutPrompt };
 };
 
-const buildFlux3Graph = (
-  settings: GenerateSettings,
-  model: MainModelConfig,
-  outputIsIntermediate: boolean,
-  projectSettings: GenerationProjectSettings
-): FamilyGraph => {
+interface Flux3PipelineExtras extends PipelineExtras {
+  /** Generate's prompt upsampler, which takes the layout prompt's place and reads the reference images. */
+  upsamplerModel?: ComponentModelConfig | null;
+}
+
+/** Prompt, loader, LoRAs, encoder, denoise and decode of FLUX.3; references and metadata are the caller's. */
+export const buildFlux3Pipeline = (input: FamilyPipelineInput, extras: Flux3PipelineExtras = {}) => {
+  const { model, settings } = input;
   const isDiffusers = model.format === 'diffusers';
   const vaeModel = getCompatibleVae(settings, model);
   const qwen3VlEncoderModel = getCompatibleComponent(settings.qwen3VLEncoderModel, isQwen3Vl4bEncoder);
@@ -2143,12 +2182,7 @@ const buildFlux3Graph = (
       ])
     : modelLoader;
   // Canvas regions become a box table at run time; the prompt upsampler takes this place when on.
-  const upsamplerModel = settings.flux3PromptUpsamplerEnabled
-    ? requireComponent(
-        getCompatibleComponent(settings.flux3PromptUpsamplerModel, isVisionTextLlm),
-        'FLUX.3 prompt upsampler model'
-      )
-    : null;
+  const upsamplerModel = extras.upsamplerModel ?? null;
   const layoutPrompt: BackendInvocationContract = upsamplerModel
     ? addNode(graph, {
         id: 'prompt_upsampler',
@@ -2158,27 +2192,22 @@ const buildFlux3Graph = (
     : addNode(graph, { id: 'layout_prompt', type: 'flux3_layout_prompt' });
   const posCond = addNode(graph, { id: 'pos_cond', type: 'flux3_text_encoder' });
   const negCond = useCfg ? addNode(graph, { id: 'neg_cond', type: 'flux3_text_encoder' }) : null;
-  const denoiseSize = getDenoiseSize(settings, model);
   const denoise = addNode(graph, {
     cfg_scale: settings.cfgScale,
     denoising_end: 1,
-    denoising_start: 0,
-    height: denoiseSize.height,
+    denoising_start: input.denoisingStart,
+    height: input.denoiseSize.height,
     id: 'denoise_latents',
     steps: settings.steps,
     type: 'flux3_denoise',
-    width: denoiseSize.width,
+    width: input.denoiseSize.width,
   });
   // FLUX.3 decodes with the FLUX.2 VAE, so it reuses FLUX.2's decode node and PiD decoders.
-  const output = addDecodeOutput({
+  const output = addPipelineDecode(graph, input, extras.decode, {
     denoise,
-    graph,
     l2iType: 'flux2_vae_decode',
-    model,
-    outputIsIntermediate,
     positivePrompt,
     seed,
-    settings,
     vaeSource: modelLoader,
   });
 
@@ -2196,7 +2225,37 @@ const buildFlux3Graph = (
   }
 
   addEdge(graph, seed, 'value', denoise, 'seed');
-  const referenceCollect = addFluxKontextReferenceImages(graph, settings, denoise, 'flux2_reference_image');
+
+  return {
+    components: { qwen3VlEncoderModel },
+    conditioning: null,
+    denoise,
+    denoiseSize: input.denoiseSize,
+    graph,
+    latents: { encodeType: FLUX2_ENCODE_TYPE, vae: { field: 'vae', node: modelLoader } },
+    layoutPrompt,
+    output,
+    upsamplerModel,
+    vaeModel,
+  };
+};
+
+/** The reference images of an edit, which the layout prompt (or the upsampler) learns of as edit targets. */
+export const addFlux3ReferenceImages = (
+  graph: BackendGraphContract,
+  {
+    denoise,
+    layoutPrompt,
+    upsamplerModel,
+  }: {
+    denoise: BackendInvocationContract;
+    layoutPrompt: BackendInvocationContract;
+    upsamplerModel: ComponentModelConfig | null;
+  },
+  imageNames: readonly string[]
+): void => {
+  const referenceCollect = addFluxKontextImages(graph, imageNames, denoise, 'flux2_reference_image');
+
   if (upsamplerModel) {
     // The upsampler derives edit targets from the images it receives; one collect feeds it and the denoiser.
     if (referenceCollect) {
@@ -2206,6 +2265,35 @@ const buildFlux3Graph = (
     // With reference images FLUX.3 edits them, and its boxes mark where new content goes in the output.
     layoutPrompt.edit_targets = true;
   }
+};
+
+const buildFlux3Graph = (
+  settings: GenerateSettings,
+  model: MainModelConfig,
+  outputIsIntermediate: boolean,
+  projectSettings: GenerationProjectSettings
+): FamilyGraph => {
+  const pipeline = buildFlux3Pipeline(
+    toGeneratePipelineInput(settings, model, outputIsIntermediate, projectSettings, getDenoiseSize(settings, model)),
+    {
+      decode: getGenerateDecode(settings, model, outputIsIntermediate),
+      upsamplerModel: settings.flux3PromptUpsamplerEnabled
+        ? requireComponent(
+            getCompatibleComponent(settings.flux3PromptUpsamplerModel, isVisionTextLlm),
+            'FLUX.3 prompt upsampler model'
+          )
+        : null,
+    }
+  );
+  const { denoise, graph, layoutPrompt, output, upsamplerModel } = pipeline;
+
+  addFlux3ReferenceImages(
+    graph,
+    { denoise, layoutPrompt, upsamplerModel },
+    getEnabledReferenceImages(settings.referenceImages, 'flux2_reference_image').flatMap(({ config: { image } }) =>
+      image ? [toImageField(image).image_name] : []
+    )
+  );
   const metadata = addMetadata(graph, output, settings, model, 'flux3_txt2img', projectSettings, {
     // FLUX.3 offers no scheduler: its denoise node always runs the reference Euler sampler.
     scheduler: 'euler',
@@ -2217,14 +2305,7 @@ const buildFlux3Graph = (
   }
   addReferenceImageMetadata(graph, settings);
 
-  return {
-    conditioning: null,
-    denoise,
-    denoiseSize: { height: denoise.height, width: denoise.width },
-    graph,
-    latents: { encodeType: FLUX2_ENCODE_TYPE, vae: { field: 'vae', node: modelLoader } },
-    layoutPrompt,
-  };
+  return pipeline;
 };
 
 const buildIdeogram4Graph = (

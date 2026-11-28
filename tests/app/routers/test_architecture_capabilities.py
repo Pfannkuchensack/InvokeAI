@@ -91,3 +91,20 @@ def test_the_rows_are_ordered_stably(client: TestClient) -> None:
     rows = client.get(URL).json()
     bases = [r["base"] for r in rows]
     assert bases == sorted(bases)
+
+
+def test_instruction_edit_is_served_for_the_edit_bases_and_null_elsewhere(client: TestClient) -> None:
+    rows = client.get(URL).json()
+    served = {(r["base"], r["variant"]): r["features"]["instruction_edit"] for r in rows}
+
+    expected = {
+        "flux2": {"requires_variant": None, "img2img_start": False},
+        "flux3": {"requires_variant": None, "img2img_start": False},
+        "qwen-image": {"requires_variant": "edit", "img2img_start": False},
+        "qwen-image-2-1": {"requires_variant": None, "img2img_start": False},
+    }
+    for base, value in expected.items():
+        rows_of_base = {key: v for key, v in served.items() if key[0] == base}
+        assert rows_of_base
+        assert all(v == value for v in rows_of_base.values()), base
+    assert all(value is None for (base, _), value in served.items() if base not in expected)

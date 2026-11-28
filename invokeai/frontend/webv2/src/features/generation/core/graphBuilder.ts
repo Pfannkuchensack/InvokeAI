@@ -308,10 +308,25 @@ export const getRecordedVaePrecision = (graph: BackendGraphContract): { vae_prec
   return switches.length > 0 ? { vae_precision: switches.includes(true) ? 'fp32' : 'fp16' } : {};
 };
 
+/** What `core_metadata` records of the settings; the rest of a run's identity comes from the graph. */
+export type MetadataSettings = Pick<
+  GenerateSettings,
+  | 'cfgRescaleMultiplier'
+  | 'cfgScale'
+  | 'clipSkip'
+  | 'height'
+  | 'scheduler'
+  | 'seamlessXAxis'
+  | 'seamlessYAxis'
+  | 'steps'
+  | 'vae'
+  | 'width'
+>;
+
 export const addMetadata = (
   graph: BackendGraphContract,
   outputNode: BackendInvocationContract,
-  settings: GenerateSettings,
+  settings: MetadataSettings,
   model: GenerateModelConfig,
   generationMode: string | null,
   projectSettings: GenerationProjectSettings & { randDevice?: string },

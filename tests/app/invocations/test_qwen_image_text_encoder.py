@@ -922,3 +922,39 @@ class TestReferenceImagesNeedAVisionTower:
             self._invocation([]).invoke(self._context(ModelFormat.GGUFQuantized))
 
         assert encode.call_args.args[1] == []
+
+
+class TestReferenceTemplate:
+    _PLACEHOLDER = "<|vision_start|><|image_pad|><|vision_end|>"
+
+    def test_legacy_prompt_is_byte_identical_to_the_original(self):
+        expected = (
+            "<|im_start|>system\nDescribe the key features of the input image (color, shape, size, texture, objects, "
+            "background), then explain how the user's text instruction should alter or modify the image. Generate a "
+            "new image that meets the user's requirements while maintaining consistency with the original input "
+            f"where appropriate.<|im_end|>\n<|im_start|>user\n{self._PLACEHOLDER * 2}make it red<|im_end|>\n"
+            "<|im_start|>assistant\n"
+        )
+        assert _build_prompt("make it red", 2) == expected
+        assert _build_prompt("make it red", 2, "legacy") == expected
+
+    def test_edit_plus_matches_the_diffusers_template(self):
+        """Diffusers' Edit Plus template: the same system prompt, then 'Picture N: <placeholder>' per image."""
+        legacy = _build_prompt("blend", 3, "legacy")
+        prompt = _build_prompt("blend", 3, "edit_plus")
+        labeled = "".join(f"Picture {i}: {self._PLACEHOLDER}" for i in (1, 2, 3))
+        assert prompt == legacy.replace(self._PLACEHOLDER * 3, labeled)
+        assert f"<|im_start|>user\n{labeled}blend<|im_end|>" in prompt
+
+    def test_the_template_has_no_effect_without_images(self):
+        assert _build_prompt("p", 0, "edit_plus") == _build_prompt("p", 0)
+
+    @pytest.mark.parametrize("size", [(1024, 1024), (1536, 1024), (1024, 2048), (100, 100), (777, 333)])
+    def test_edit_plus_size_is_diffusers_calculate_dimensions(self, size):
+        from diffusers.pipelines.qwenimage.pipeline_qwenimage_edit_plus import (
+            CONDITION_IMAGE_SIZE,
+            calculate_dimensions,
+        )
+
+        resized = QwenImageTextEncoderInvocation._resize_for_edit_plus_encoder(Image.new("RGB", size))
+        assert resized.size == calculate_dimensions(CONDITION_IMAGE_SIZE, size[0] / size[1])

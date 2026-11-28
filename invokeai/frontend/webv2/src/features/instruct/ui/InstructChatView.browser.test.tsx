@@ -1,0 +1,491 @@
+import type { InstructNode, InstructTreeView } from '@features/instruct/core/types';
+
+/* oxlint-disable react-perf/jsx-no-new-function-as-prop, react-perf/jsx-no-new-object-as-prop */
+import { ChakraProvider } from '@chakra-ui/react';
+import { DndContext } from '@dnd-kit/core';
+import { GalleryHostProvider, type GalleryHost } from '@features/gallery/picker';
+import { satisfiedSettingsFor } from '@features/generation/core/graphCoverage.testing';
+import { requestInstructEntry, takeInstructEntry } from '@features/instruct/core/entryRequests';
+import { normalizeInstructValues } from '@features/instruct/core/values';
+import { seedArchitectureCapabilities } from '@features/models/core/architectureCapabilities.testing';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { system } from '@theme/system';
+import { createInstance } from 'i18next';
+import { act } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
+import { I18nextProvider, initReactI18next } from 'react-i18next';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+import type { InstructUiAdapter } from './InstructUiContext';
+
+import { InstructChatView } from './InstructChatView';
+import { InstructUiProvider } from './InstructUiContext';
+
+seedArchitectureCapabilities();
+
+const i18n = createInstance();
+
+void i18n.use(initReactI18next).init({ fallbackLng: 'en', initAsync: false, lng: 'en', resources: { en: {} } });
+
+(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+const { model, settings } = satisfiedSettingsFor('flux2', {
+  label: 'dev',
+  overrides: { format: 'diffusers', variant: 'dev' },
+});
+const EDIT_VALUES = { instruction: '', model, seedMode: 'fixed', settings, variants: 1 };
+
+const node = (
+  id: string,
+  parentId: string | null,
+  stepId: string,
+  extra: Partial<InstructNode> = {}
+): InstructNode => ({
+  height: 64,
+  id,
+  imageName: `${id}.png`,
+  instruction: `instruction ${stepId}`,
+  parentId,
+  referenceImages: [],
+  seed: 1,
+  status: 'completed',
+  stepId,
+  width: 64,
+  ...extra,
+});
+
+const createTree = (nodes: InstructNode[], pathIds: string[]): InstructTreeView => ({
+  nodes,
+  path: pathIds.map((id) => nodes.find((candidate) => candidate.id === id)!),
+  rootNodeId: nodes[0]!.id,
+  selection: {},
+});
+
+const galleryHost: GalleryHost = {
+  galleryValues: {} as GalleryHost['galleryValues'],
+  notifications: { add: vi.fn(), reportError: vi.fn() },
+  projectName: '',
+};
+const queryClient = new QueryClient();
+
+let container: HTMLDivElement;
+let root: Root;
+let adapter: InstructUiAdapter;
+
+const values = (extra: Record<string, unknown> = {}) => normalizeInstructValues({ ...EDIT_VALUES, ...extra });
+
+const createAdapter = (overrides: Partial<InstructUiAdapter> = {}): InstructUiAdapter => ({
+  abandonStep: vi.fn(),
+  canReset: false,
+  cancelStep: vi.fn(),
+  hasUnreadableHistory: false,
+  missingImages: new Set<string>(),
+  openImage: vi.fn(),
+  patchValues: vi.fn(),
+  projectId: 'project-1',
+  pasteShortcut: 'Ctrl+V',
+  readValues: () => values(),
+  reportError: vi.fn(),
+  reset: vi.fn(),
+  runAgain: vi.fn(() => Promise.resolve()),
+  selectChild: vi.fn(),
+  startFromImage: vi.fn(),
+  stepRuns: {},
+  submit: vi.fn(() => Promise.resolve()),
+  tree: null,
+  uploadFile: vi.fn(() => Promise.resolve(null)),
+  values: values(),
+  ...overrides,
+});
+
+const render = (overrides: Partial<InstructUiAdapter> = {}) => {
+  adapter = createAdapter(overrides);
+  act(() => {
+    root.render(
+      <I18nextProvider i18n={i18n}>
+        <ChakraProvider value={system}>
+          <QueryClientProvider client={queryClient}>
+            <GalleryHostProvider host={galleryHost}>
+              <InstructUiProvider adapter={adapter}>
+                <DndContext>
+                  <InstructChatView />
+                </DndContext>
+              </InstructUiProvider>
+            </GalleryHostProvider>
+          </QueryClientProvider>
+        </ChakraProvider>
+      </I18nextProvider>
+    );
+  });
+};
+
+const getComposer = () => container.querySelector<HTMLTextAreaElement>('textarea')!;
+
+const type = (textarea: HTMLTextAreaElement, text: string) => {
+  const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+
+  act(() => {
+    setValue.call(textarea, text);
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+};
+
+const press = (textarea: HTMLTextAreaElement, init: KeyboardEventInit) =>
+  act(() => {
+    textarea.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }));
+  });
+
+beforeEach(() => {
+  container = document.createElement('div');
+  document.body.append(container);
+  root = createRoot(container);
+});
+
+afterEach(() => {
+  act(() => root.unmount());
+  container.remove();
+});
+
+describe('Edit composer', () => {
+  const finished = [node('root', null, 'root'), node('a', 'root', 's1')];
+
+  it('sends the typed instruction on Enter and keeps Shift+Enter for a new line', () => {
+    render({ tree: createTree(finished, ['root', 'a']) });
+    const textarea = getComposer();
+
+    type(textarea, 'make it red');
+    press(textarea, { key: 'Enter', shiftKey: true });
+
+    expect(adapter.submit).not.toHaveBeenCalled();
+
+    press(textarea, { key: 'Enter' });
+
+    // The instruction reaches the project before the step is queued.
+    expect(adapter.patchValues).toHaveBeenCalledWith({ instruction: 'make it red' });
+    expect(adapter.submit).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(adapter.patchValues).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(adapter.submit).mock.invocationCallOrder[0]!
+    );
+  });
+
+  const single = satisfiedSettingsFor('flux2', {
+    label: 'klein',
+    overrides: { format: 'gguf_quantized', variant: 'klein_9b' },
+  });
+
+  it('does not send while a component the model needs is missing', () => {
+    render({
+      tree: createTree(finished, ['root', 'a']),
+      values: values({ model: single.model, settings: { ...single.settings, qwen3EncoderModel: null, vae: null } }),
+    });
+    const textarea = getComposer();
+
+    type(textarea, 'make it red');
+    press(textarea, { key: 'Enter' });
+
+    expect(adapter.submit).not.toHaveBeenCalled();
+    const send = container.querySelector('button[aria-label="widgets.instruct.send"]')!;
+    expect(send.getAttribute('aria-disabled')).toBe('true');
+    expect(document.getElementById(send.getAttribute('aria-describedby')!)?.textContent).toMatch(/^Edit needs a /);
+  });
+
+  it('is locked while the step at the end of the branch runs, with its progress and a way to cancel', () => {
+    render({
+      stepRuns: { s1: 'running' },
+      tree: createTree([finished[0]!, node('a', 'root', 's1', { imageName: null, status: 'pending' })], ['root', 'a']),
+    });
+    const textarea = getComposer();
+
+    type(textarea, 'ignored');
+    press(textarea, { key: 'Enter' });
+
+    expect(textarea.readOnly).toBe(true);
+    expect(adapter.submit).not.toHaveBeenCalled();
+
+    const cancel = Array.from(container.querySelectorAll('button')).filter(
+      (button) => button.textContent === 'common.cancel'
+    );
+
+    expect(cancel.length).toBeGreaterThan(0);
+    act(() => cancel[0]!.click());
+    expect(adapter.cancelStep).toHaveBeenCalledWith('s1');
+  });
+
+  it('stops waiting for a step this browser holds no run for only after a confirmation', async () => {
+    render({
+      tree: createTree([finished[0]!, node('a', 'root', 's1', { imageName: null, status: 'pending' })], ['root', 'a']),
+    });
+    const cancel = Array.from(container.querySelectorAll('button')).find(
+      (button) => button.textContent === 'common.cancel'
+    )!;
+
+    act(() => cancel.click());
+    expect(adapter.cancelStep).not.toHaveBeenCalled();
+    expect(adapter.abandonStep).not.toHaveBeenCalled();
+
+    await vi.waitFor(() =>
+      expect(
+        Array.from(document.querySelectorAll('button')).some(
+          (button) => button.textContent === 'widgets.instruct.abandonConfirm'
+        )
+      ).toBe(true)
+    );
+    const confirm = Array.from(document.querySelectorAll('button')).find(
+      (button) => button.textContent === 'widgets.instruct.abandonConfirm'
+    )!;
+
+    act(() => confirm.click());
+    expect(adapter.abandonStep).toHaveBeenCalledWith('s1');
+  });
+
+  it('stays unlocked on another branch while a different step runs', () => {
+    const nodes = [
+      node('root', null, 'root'),
+      node('a', 'root', 's1'),
+      node('b', 'root', 's2', { imageName: null, status: 'pending' }),
+    ];
+
+    render({ values: values({ continueFromNodeId: 'a' }), tree: createTree(nodes, ['root', 'a']) });
+
+    expect(getComposer().readOnly).toBe(false);
+  });
+});
+
+describe('Edit history', () => {
+  it('moves among the steps under one image with the switcher', () => {
+    const nodes = [node('root', null, 'root'), node('a', 'root', 's1'), node('b', 'root', 's2')];
+
+    render({ tree: createTree(nodes, ['root', 'b']) });
+    const previous = container.querySelector<HTMLButtonElement>('[aria-label="widgets.instruct.previousStep"]')!;
+
+    expect(container.textContent).toContain('2 / 2');
+    act(() => previous.click());
+    expect(adapter.selectChild).toHaveBeenCalledWith('root', 'a');
+  });
+
+  it('shows a failed variant with its error and runs it again from its parent', () => {
+    const nodes = [
+      node('root', null, 'root'),
+      node('a', 'root', 's1', { error: 'out of memory', imageName: null, status: 'failed' }),
+    ];
+
+    render({ tree: createTree(nodes, ['root', 'a']) });
+    const again = Array.from(container.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('widgets.instruct.runAgain')
+    )!;
+
+    expect(container.textContent).toContain('out of memory');
+    act(() => again.click());
+    expect(adapter.runAgain).toHaveBeenCalledWith('a');
+  });
+});
+
+describe('Edit empty state', () => {
+  it('starts the history from a pasted image', async () => {
+    const image = { height: 480, image_name: 'pasted.png', width: 640 };
+
+    render({ uploadFile: vi.fn(() => Promise.resolve(image)) });
+    const transfer = new DataTransfer();
+
+    transfer.items.add(new File(['x'], 'pasted.png', { type: 'image/png' }));
+    await act(async () => {
+      document.body.dispatchEvent(
+        new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: transfer })
+      );
+      await Promise.resolve();
+    });
+
+    expect(adapter.uploadFile).toHaveBeenCalledTimes(1);
+    expect(adapter.startFromImage).toHaveBeenCalledWith(image);
+  });
+});
+
+describe('Edit entry requests', () => {
+  const image = { height: 480, image_name: 'sent.png', width: 640 };
+  const nodes = [node('root', null, 'root'), node('a', 'root', 's1'), node('b', 'a', 's2')];
+  /** The dialog opens in a portal a moment after the request. */
+  const clickButton = async (label: string) => {
+    const find = () => Array.from(document.querySelectorAll('button')).find((button) => button.textContent === label);
+
+    await vi.waitFor(() => expect(find()).toBeDefined());
+    act(() => find()!.click());
+  };
+
+  afterEach(() => {
+    takeInstructEntry('project-1');
+  });
+
+  it('starts the history from an image sent before the view mounted', () => {
+    requestInstructEntry({ image, projectId: 'project-1' });
+    render();
+
+    expect(adapter.startFromImage).toHaveBeenCalledExactlyOnceWith(image);
+  });
+
+  it('starts it from an image sent while the view shows', () => {
+    render();
+    act(() => requestInstructEntry({ image, projectId: 'project-1' }));
+
+    expect(adapter.startFromImage).toHaveBeenCalledExactlyOnceWith(image);
+  });
+
+  it('drops a request for another project: its project was left', () => {
+    requestInstructEntry({ image, projectId: 'project-2' });
+    render();
+
+    expect(adapter.startFromImage).not.toHaveBeenCalled();
+    expect(takeInstructEntry('project-2')).toBeNull();
+  });
+
+  it('lets a newer request replace one waiting on the replace dialog, with only its own values', async () => {
+    const tree = createTree(nodes, ['root', 'a', 'b']);
+
+    requestInstructEntry({ image, projectId: 'project-1', values: { instruction: 'first' } });
+    render({ tree });
+    await vi.waitFor(() => expect(document.querySelector('[role="alertdialog"]')).not.toBeNull());
+    act(() =>
+      requestInstructEntry({
+        image: { height: 480, image_name: 'other.png', width: 640 },
+        projectId: 'project-1',
+        values: { instruction: 'second' },
+      })
+    );
+    await clickButton('widgets.instruct.replaceConfirm');
+
+    expect(adapter.startFromImage).toHaveBeenCalledExactlyOnceWith({
+      height: 480,
+      image_name: 'other.png',
+      width: 640,
+    });
+    expect(adapter.patchValues).toHaveBeenCalledExactlyOnceWith({ instruction: 'second' });
+  });
+
+  it('applies the values meant for keeping the old history when the user does', async () => {
+    requestInstructEntry({
+      image,
+      projectId: 'project-1',
+      values: { instruction: 'recalled', sizeMode: 'auto' },
+      valuesIfKept: { instruction: 'recalled', sizeMode: 'manual' },
+    });
+    render({ tree: createTree(nodes, ['root', 'a', 'b']) });
+    await clickButton('common.cancel');
+
+    expect(adapter.patchValues).toHaveBeenCalledExactlyOnceWith({ instruction: 'recalled', sizeMode: 'manual' });
+  });
+
+  it('asks before replacing a history that does not hold the image, and replaces it once confirmed', async () => {
+    requestInstructEntry({ image, projectId: 'project-1' });
+    render({ tree: createTree(nodes, ['root', 'a', 'b']) });
+
+    expect(adapter.startFromImage).not.toHaveBeenCalled();
+    await clickButton('widgets.instruct.replaceConfirm');
+    expect(adapter.startFromImage).toHaveBeenCalledExactlyOnceWith(image);
+  });
+
+  it('jumps to the node of an image the history already holds, without asking', () => {
+    requestInstructEntry({ image: { height: 64, image_name: 'a.png', width: 64 }, projectId: 'project-1' });
+    render({ tree: createTree(nodes, ['root', 'a', 'b']) });
+
+    expect(adapter.startFromImage).not.toHaveBeenCalled();
+    expect(adapter.selectChild).toHaveBeenCalledWith('root', 'a');
+    // A node with steps below it is where the next step branches off.
+    expect(adapter.patchValues).toHaveBeenCalledWith({ continueFromNodeId: 'a' });
+  });
+
+  it('marks the continue point at the end of a branch when a recall asks for it', () => {
+    requestInstructEntry({
+      continueFromImage: true,
+      image: { height: 64, image_name: 'b.png', width: 64 },
+      projectId: 'project-1',
+      values: { instruction: 'recalled' },
+    });
+    render({ tree: createTree(nodes, ['root', 'a', 'b']) });
+
+    expect(adapter.patchValues).toHaveBeenCalledWith({ continueFromNodeId: 'b' });
+    expect(adapter.patchValues).toHaveBeenCalledWith({ instruction: 'recalled' });
+  });
+
+  it('applies the recalled values after the restart, and also when the user keeps the old history', async () => {
+    const recalled = { instruction: 'recalled' };
+
+    requestInstructEntry({ continueFromImage: true, image, projectId: 'project-1', values: recalled });
+    render({ tree: createTree(nodes, ['root', 'a', 'b']) });
+    await clickButton('widgets.instruct.replaceConfirm');
+
+    expect(adapter.patchValues).toHaveBeenCalledExactlyOnceWith(recalled);
+    expect(vi.mocked(adapter.startFromImage).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(adapter.patchValues).mock.invocationCallOrder[0]!
+    );
+
+    act(() => root.unmount());
+    root = createRoot(container);
+    requestInstructEntry({ continueFromImage: true, image, projectId: 'project-1', values: recalled });
+    render({ tree: createTree(nodes, ['root', 'a', 'b']) });
+    await clickButton('common.cancel');
+
+    expect(adapter.startFromImage).not.toHaveBeenCalled();
+    expect(adapter.patchValues).toHaveBeenCalledExactlyOnceWith(recalled);
+  });
+});
+
+describe('Edit history with images this session could not find', () => {
+  const nodes = [node('root', null, 'root'), node('a', 'root', 's1')];
+
+  it('shows them as not available, apart from deleted ones, and does not continue from one', () => {
+    render({ missingImages: new Set(['a.png']), tree: createTree(nodes, ['root', 'a']) });
+
+    expect(container.textContent).toContain('widgets.instruct.unavailable');
+    expect(container.textContent).not.toContain('widgets.instruct.deleted');
+    expect(container.textContent).toContain('widgets.instruct.tipUnavailable');
+
+    const textarea = getComposer();
+
+    type(textarea, 'make it red');
+    press(textarea, { key: 'Enter' });
+    expect(adapter.submit).not.toHaveBeenCalled();
+  });
+});
+
+describe('Edit composer references this session could not find', () => {
+  it('does not send while one is unavailable, and names it', () => {
+    const reference = { height: 64, image_name: 'gone.png', width: 64 };
+
+    render({
+      missingImages: new Set(['gone.png']),
+      tree: createTree([node('root', null, 'root'), node('a', 'root', 's1')], ['root', 'a']),
+      values: values({ references: [reference] }),
+    });
+    const textarea = getComposer();
+
+    type(textarea, 'make it red');
+    press(textarea, { key: 'Enter' });
+
+    expect(adapter.submit).not.toHaveBeenCalled();
+    const send = container.querySelector('button[aria-label="widgets.instruct.send"]')!;
+
+    expect(document.getElementById(send.getAttribute('aria-describedby')!)?.textContent).toBe(
+      'widgets.instruct.referenceUnavailable'
+    );
+  });
+});
+
+describe('Edit empty state over an unreadable history', () => {
+  it('says so and offers no way to upload, drop or paste an image', async () => {
+    const uploadFile = vi.fn(() => Promise.resolve(null));
+
+    render({ hasUnreadableHistory: true, uploadFile });
+    const transfer = new DataTransfer();
+
+    transfer.items.add(new File(['x'], 'pasted.png', { type: 'image/png' }));
+    await act(async () => {
+      document.body.dispatchEvent(
+        new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: transfer })
+      );
+      await Promise.resolve();
+    });
+
+    expect(container.textContent).toContain('widgets.instruct.historyUnreadable');
+    expect(container.querySelector('input[type="file"]')).toBeNull();
+    expect(uploadFile).not.toHaveBeenCalled();
+  });
+});

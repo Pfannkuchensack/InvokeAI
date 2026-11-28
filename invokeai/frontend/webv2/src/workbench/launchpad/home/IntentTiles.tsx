@@ -5,7 +5,7 @@ import { Link } from '@tanstack/react-router';
 import { LAUNCHPAD_START_ENTRIES } from '@workbench/launchpad/startEntries';
 import { useTranslation } from 'react-i18next';
 
-const TILE_COLUMNS = { base: 1, lg: 5, sm: 2 } as const;
+const TILE_COLUMNS = { base: 1, lg: 3, sm: 2 } as const;
 // Tiles follow the theme's control cursor convention.
 const TILE_LINK_STYLE = { cursor: 'default' } as const;
 const TILE_HOVER = { bg: 'bg.muted', borderColor: 'border.emphasized' } as const;

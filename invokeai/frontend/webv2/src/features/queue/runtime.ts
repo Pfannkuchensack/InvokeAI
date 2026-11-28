@@ -104,6 +104,8 @@ export interface QueueHistoryCommands {
     projectId: string;
     queueItemId: string;
   }): void;
+  /** The project's restored runs are in the history: a run it lists is the only one still able to deliver a result. */
+  markProjectQueueLoaded(payload: { projectId: string }): void;
   noteFirstProgressFrame(payload: { itemIndex: number; projectId: string; queueItemId: string }): void;
   /** Acceptance by the backend or the run ending clears it. */
   recordSubmissionRetry(payload: { projectId: string; queueItemId: string; retry: QueueSubmissionRetry }): void;
@@ -2569,6 +2571,7 @@ export const createQueueRuntime = ({
 
   const loadProjectJournal = (projectId: string): void => {
     if (!journal) {
+      // No journal means it could not be opened; the runs are unknown, so nothing is announced.
       loadedProjectIds.add(projectId);
       return;
     }
@@ -2589,6 +2592,7 @@ export const createQueueRuntime = ({
             }
           }
           commands.restoreFromJournal({ items: result.entries.map((entry) => entry.item), projectId });
+          commands.markProjectQueueLoaded({ projectId });
         } else {
           reportJournalLoadFailure(projectId);
         }
@@ -2658,6 +2662,7 @@ export const createQueueRuntime = ({
               }
             }
             commands.restoreFromJournal({ items: result.entries.map((entry) => entry.item), projectId: project.id });
+            commands.markProjectQueueLoaded({ projectId: project.id });
           } else {
             reportJournalLoadFailure(project.id);
           }

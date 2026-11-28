@@ -382,7 +382,7 @@ describe('Preview mixed media actions', () => {
     );
 
     expect(host?.querySelector('[aria-label="Select for Compare"]')).toBeNull();
-    expect(host?.querySelector('[aria-label="Edit"]')).toBeNull();
+    expect(host?.querySelector('[aria-label="Continue"]')).toBeNull();
 
     const copyFrame = host?.querySelector<HTMLButtonElement>('[aria-label="Copy Current Frame"]');
     const star = host?.querySelector<HTMLButtonElement>('[aria-label="Unstar video"]');

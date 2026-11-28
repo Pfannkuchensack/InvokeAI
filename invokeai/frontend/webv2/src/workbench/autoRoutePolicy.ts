@@ -18,6 +18,7 @@ export type WorkbenchActionOrigin = CanvasMutationOrigin;
 export const autoSwitchDestinations: Record<InvocationSourceId, ResultDestination> = {
   canvas: 'canvas',
   generate: 'gallery',
+  instruct: 'gallery',
   upscale: 'gallery',
   video: 'gallery',
   workflow: 'gallery',

@@ -151,6 +151,15 @@
         "klein-9b-standalone": [
           "qwen3EncoderModel",
           "vae"
+        ],
+        "edit-dev-diffusers": [],
+        "edit-dev-standalone": [
+          "mistralEncoderModel",
+          "vae"
+        ],
+        "edit-klein-9b-standalone": [
+          "qwen3EncoderModel",
+          "vae"
         ]
       },
       "nodeTypes": [
@@ -179,7 +188,13 @@
           "qwen3VLEncoderModel",
           "vae"
         ],
-        "klein-base-diffusers": []
+        "klein-base-diffusers": [],
+        "edit-klein-diffusers": [],
+        "edit-klein-standalone": [
+          "qwen3VLEncoderModel",
+          "vae"
+        ],
+        "edit-klein-base-diffusers": []
       },
       "nodeTypes": [
         "collect",
@@ -245,16 +260,23 @@
         "standalone-components": [
           "qwenVLEncoderModel",
           "vae"
+        ],
+        "edit-diffusers": [],
+        "edit-standalone-components": [
+          "qwenVLEncoderModel",
+          "vae"
         ]
       },
       "nodeTypes": [
         "collect",
         "core_metadata",
+        "image",
         "img_nsfw",
         "img_watermark",
         "integer",
         "lora_selector",
         "qwen_image_denoise",
+        "qwen_image_i2l",
         "qwen_image_l2i",
         "qwen_image_lora_collection_loader",
         "qwen_image_model_loader",
@@ -349,6 +371,15 @@
           "vae"
         ],
         "standalone-gguf-encoder": [
+          "qwen3VLEncoderModel",
+          "vae"
+        ],
+        "edit-diffusers": [],
+        "edit-standalone-components": [
+          "qwen3VLEncoderModel",
+          "vae"
+        ],
+        "edit-standalone-gguf-encoder": [
           "qwen3VLEncoderModel",
           "vae"
         ]
@@ -778,6 +809,9 @@
         "dype_scale": [
           3
         ],
+        "edit_source_image_name": [
+          "edit-source.png"
+        ],
         "flux3_prompt_upsampler": [],
         "generation_mode": [
           "anima_txt2img",
@@ -785,12 +819,16 @@
           "ernie_image_txt2img",
           "flux_outpaint",
           "flux_txt2img",
+          "flux2_edit",
           "flux2_txt2img",
+          "flux3_edit",
           "flux3_txt2img",
           "ideogram4_txt2img",
           "krea2_txt2img",
           "moss_image_txt2img",
+          "qwen_image_2_1_edit",
           "qwen_image_2_1_txt2img",
+          "qwen_image_edit",
           "qwen_image_txt2img",
           "sd3_txt2img",
           "sdxl_img2img",
@@ -2459,6 +2497,7 @@
       "inputs": [
         "negative_conditioning",
         "positive_conditioning",
+        "reference_latents",
         "seed",
         "transformer",
         "vae"
@@ -2492,9 +2531,13 @@
     },
     "qwen_image_i2l": {
       "inputs": [
+        "image",
         "vae"
       ],
       "literalInputs": {
+        "height": [
+          1024
+        ],
         "image": [],
         "is_intermediate": [
           true
@@ -2504,6 +2547,9 @@
         ],
         "use_cache": [
           true
+        ],
+        "width": [
+          1024
         ]
       },
       "outputs": [
@@ -2570,7 +2616,8 @@
     "qwen_image_text_encoder": {
       "inputs": [
         "prompt",
-        "qwen_vl_encoder"
+        "qwen_vl_encoder",
+        "reference_images"
       ],
       "literalInputs": {
         "is_intermediate": [
@@ -2578,6 +2625,9 @@
         ],
         "quantization": [
           "nf4"
+        ],
+        "reference_template": [
+          "edit_plus"
         ],
         "use_cache": [
           true

@@ -10,13 +10,21 @@ import type { GalleryImage } from '@features/gallery';
 import type { GenerateModelConfig, GenerateWidgetValues, MainModelConfig } from '@features/generation/contracts';
 import type { SpandrelModelConfig } from '@features/upscale/core/types';
 
-import { recallCatalogFor } from '@features/generation/core/graphCoverage.testing';
+import {
+  generateGraphCases,
+  recallCatalogFor,
+  recallTunedSettingsFor,
+} from '@features/generation/core/graphCoverage.testing';
+import { compileEditGraph } from '@features/generation/editGraph';
 import {
   deriveAspectRatioId,
+  type EditBase,
   getDefaultGenerateSettings,
   getEffectivePrompts,
   getExternalResolutionPresets,
   getGenerationUiPolicy,
+  getInstructionEditSupport,
+  isEditBase,
   isSupportedGenerateModel,
   isVaeModelConfig,
   normalizeReferenceImages,
@@ -42,6 +50,7 @@ import {
   compileGenerateRecordCase,
   type GenerateRecordCase,
   generateRecordCases,
+  PROJECT_SETTINGS,
 } from './imageRecordCases.testing';
 import { isRuntimeValue, type KnownKeys, recordOf } from './recallContract.testing';
 
@@ -309,6 +318,14 @@ const IMAGE_RECALL_CONTRACT = {
       'guidance layers from `canvas_v3_metadata` instead.',
   },
 
+  edit_source_image_name: {
+    consumed:
+      'With an Edit `generation_mode` (`flux2_edit`, `flux3_edit`, `qwen_image_edit`, `qwen_image_2_1_edit`) it sends Recall All and Remix to Edit (the source is the continue point; ' +
+      '`ref_images` minus the source are the extra references). Recall into Generate reproduces the run from ' +
+      '`ref_images`, which lists the source first. For `qwen_image_edit` this is approximate: the Qwen-Edit graph of Generate uses the older ' +
+      'single-reference layout, so it does not reproduce the Edit run.',
+  },
+
   // Upscale.
   creativity: { ignored: UPSCALE_SETTING },
   structure: { ignored: UPSCALE_SETTING },
@@ -525,6 +542,50 @@ const generateCase = (testCase: GenerateRecordCase, baseline: GenerateWidgetValu
   };
 };
 
+const EDIT_REFERENCE_TYPES = {
+  flux2: 'flux2_reference_image',
+  flux3: 'flux2_reference_image',
+  'qwen-image': 'qwen_image_reference_image',
+  'qwen-image-2-1': 'qwen_image_2_1_reference_image',
+} as const satisfies Record<EditBase, string>;
+
+/** An Edit step records itself as its family's text-to-image with the source first, which Generate recalls as it is. */
+const editCase = ({ label, model, settings }: GenerateRecordCase, baseline: GenerateWidgetValues): RecallCase => {
+  const caseLabel = `${label} / edit`;
+  const size = { height: settings.height, width: settings.width };
+  const source = { ...size, image_name: 'edit-source.png' };
+  const extra = { height: 256, image_name: 'edit-reference.png', width: 256 };
+  const compilation = compiled(caseLabel, () =>
+    compileEditGraph({
+      model: model as MainModelConfig,
+      projectSettings: PROJECT_SETTINGS,
+      referenceImages: [extra],
+      settings,
+      size,
+      source,
+    })
+  );
+  const record = recordOf(compilation, settings);
+  // The list the settings must hold after recall: the source, then the extra, from the inputs; only the ids are the
+  // record's, which the compiler mints.
+  const recordedIds = (record.ref_images as { id: string }[]).map(({ id }) => id);
+  const referenceImages = [source, extra].map((image, index) => ({
+    config: { image: { original: { image } }, type: EDIT_REFERENCE_TYPES[model.base as EditBase] },
+    id: recordedIds[index]!,
+    isEnabled: true,
+  }));
+
+  return {
+    baseline,
+    catalog: recallCatalogFor(model, settings),
+    image: imageOf(settings),
+    label: caseLabel,
+    model,
+    record,
+    tuned: { ...settings, model, referenceImages },
+  };
+};
+
 const canvasCase = (testCase: CanvasRecordCase, baseline: GenerateWidgetValues): RecallCase => {
   const { frame, isCanvasFrame, label, model, panelOverrides, settings } = testCase;
   const canvasSettings = canvasSettingsOf(testCase);
@@ -597,9 +658,18 @@ const modelOnlyUpscaleCase = (source: RecallCase): RecallCase => {
 const buildCases = (): RecallCase[] => {
   const baseline = baselineValues();
   const generate = generateRecordCases().map((testCase) => generateCase(testCase, baseline));
+  // Qwen-Image edits only as its `edit` variant, which no Generate shape is.
+  const qwenEdit = recallTunedSettingsFor('qwen-image', {
+    label: 'diffusers-edit-variant',
+    overrides: { format: 'diffusers', variant: 'edit' },
+  });
+  const edit = [...generateGraphCases.map(({ base, shape }) => recallTunedSettingsFor(base, shape)), qwenEdit]
+    .filter(({ model }) => isEditBase(model.base) && getInstructionEditSupport(model) !== null)
+    .map((fixture) => editCase(fixture, baseline));
 
   return [
     ...generate,
+    ...edit,
     ...canvasRecordCases().map((testCase) => canvasCase(testCase, baseline)),
     ...UPSCALE_CASES.map((testCase) => upscaleCase(testCase, baseline)),
     modelOnlyUpscaleCase(generate.find(({ label }) => label === 'sdxl / diffusers')!),

@@ -259,6 +259,11 @@ describe('feature public-interface registry', () => {
       checkDependency('features/generation/ui/CapabilitiesGate.tsx', '@features/models/architecturesStore')
     ).toEqual([]);
     expect(checkDependency('workbench/widgets/canvas/invoke.ts', '@features/generation/canvasGraph')).toEqual([]);
+    expect(checkDependency('workbench/invocationSubmit.ts', '@features/generation/editGraph')).toEqual([]);
+    expect(checkDependency('workbench/widgets/instruct/manifest.ts', '@features/instruct/widget')).toEqual([]);
+    expect(checkDependency('features/instruct/ui/InstructSettingsView.tsx', '@features/generation/editGraph')).toEqual(
+      []
+    );
     expect(checkDependency('workbench/WorkbenchContext.tsx', '@features/intermediates/holdLease')).toEqual([]);
     expect(
       checkDependency('features/workflow/ui/fields/RecordPickerInput.tsx', '@features/generation/systemPrompts')

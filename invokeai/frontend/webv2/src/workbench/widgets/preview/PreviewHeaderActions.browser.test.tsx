@@ -26,7 +26,6 @@ void i18n.use(initReactI18next).init({
   resources: {
     en: {
       translation: {
-        common: { edit: 'Edit' },
         widgets: {
           canvas: {
             staging: {
@@ -57,6 +56,7 @@ void i18n.use(initReactI18next).init({
               allSettingsHint: 'Includes the original seed',
               continueWorking: 'Continue working',
               editOnCanvasHint: 'Adds an image layer and opens Canvas',
+              openInEdit: 'Open in Edit',
               remixHint: 'Same settings, new seed',
               extendInVideo: 'Extend in Video',
               remixVideo: 'Remix video',
@@ -75,7 +75,8 @@ void i18n.use(initReactI18next).init({
             compareArmedTooltip: 'Pick another image to compare · click to cancel',
             details: 'Details',
             editOnCanvas: 'Edit on Canvas',
-            editThisImage: 'Edit this image',
+            continue: 'Continue',
+            continueWithImage: 'Continue with this image',
             imageActions: 'Image actions',
             selectForCompare: 'Select for Compare',
             starImage: 'Star image',
@@ -325,7 +326,7 @@ describe('preview header order', () => {
     await render();
 
     const labels = [...host!.querySelectorAll<HTMLButtonElement>('button')].map((b) => b.getAttribute('aria-label'));
-    expect(labels[0]).toBe('Edit');
+    expect(labels[0]).toBe('Continue');
     expect(labels.slice(-3)).toEqual(['Zoom 88%', 'Auto-switch: In progress', 'Details']);
     expect(host!.querySelector('[aria-label="Hide filmstrip"], [aria-label="Show filmstrip"]')).toBeNull();
     const bar = host!.firstElementChild!;
@@ -347,11 +348,11 @@ describe('preview header Edit and Use', () => {
         : `# ${row.textContent?.trim()}`
     );
 
-  it('opens every way to continue from Edit, Edit on Canvas first, each step saying what happens', async () => {
+  it('opens every way to continue from Continue, Edit on Canvas first, each step saying what happens', async () => {
     state.actionItem = STILL_IMAGE;
     await render();
 
-    const trigger = button('Edit');
+    const trigger = button('Continue');
     expect(trigger.getAttribute('aria-haspopup')).toBe('menu');
     await settle(() => trigger.click());
     expect(itemActions.sendToCanvas).not.toHaveBeenCalled();
@@ -360,6 +361,7 @@ describe('preview header Edit and Use', () => {
     expect(menuRows(menu)).toEqual([
       '# Continue working',
       'Edit on Canvas',
+      'Open in Edit',
       'Upscale',
       'Send to Video',
       'Add to Canvas as…',

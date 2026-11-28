@@ -126,8 +126,9 @@ export const firstPartyHotkeyCatalog: HotkeyDefinition[] = [
   hotkey('app', 'openSettings', ['mod+,']),
   hotkey('app', 'saveLayoutPreset', []),
   hotkey('app', 'selectComposePreset', ['alt+1']),
-  hotkey('app', 'selectEditPreset', ['alt+2']),
+  hotkey('app', 'selectEditPreset', ['alt+2'], { title: 'Select Canvas Preset' }),
   hotkey('app', 'selectVideoPreset', ['alt+3']),
+  hotkey('app', 'selectInstructPreset', ['alt+5'], { title: 'Select Edit Preset' }),
   hotkey('app', 'selectAutomatePreset', ['alt+4'], { title: 'Select Workflow Preset' }),
   // Each press stops one item; holding the key must not walk down the queue.
   hotkey('app', 'cancelQueueItem', ['shift+x'], { ignoreRepeat: true, title: 'Cancel current or next queue item' }),

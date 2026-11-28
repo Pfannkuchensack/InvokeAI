@@ -365,7 +365,12 @@ export const ModelSelect = ({
                 borderColor: isInvalid ? undefined : isOpen ? 'accent.solid' : 'border.emphasized',
               }}
             >
-              {insideLabel ? <FieldInsideLabel label={insideLabel} /> : null}
+              {insideLabel ? (
+                <>
+                  <FieldInsideLabel label={insideLabel} />
+                  {/* The visible text reads label, then value, as the accessible name does. */}{' '}
+                </>
+              ) : null}
               {selectedModel && !missingText ? (
                 <ModelButtonContent id={valueTextId} isEndAligned={Boolean(insideLabel)} model={selectedModel} />
               ) : (

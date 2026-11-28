@@ -22608,6 +22608,17 @@
             "description": "If true, reference images are read by the Qwen3-VL vision tower: the effective encoder (the model's own or a standalone one) must carry one.",
             "default": false
           },
+          "instruction_edit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InstructionEdit"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Null unless the architecture has instruction-edit models."
+          },
           "supports_regional_guidance": {
             "type": "boolean",
             "title": "Supports Regional Guidance",
@@ -32399,6 +32410,7 @@
                   "flux2_img2img",
                   "flux2_inpaint",
                   "flux2_outpaint",
+                  "flux2_edit",
                   "sd3_txt2img",
                   "sd3_img2img",
                   "sd3_inpaint",
@@ -32417,6 +32429,7 @@
                   "qwen_image_img2img",
                   "qwen_image_inpaint",
                   "qwen_image_outpaint",
+                  "qwen_image_edit",
                   "anima_txt2img",
                   "anima_img2img",
                   "anima_inpaint",
@@ -32429,10 +32442,12 @@
                   "qwen_image_2_1_img2img",
                   "qwen_image_2_1_inpaint",
                   "qwen_image_2_1_outpaint",
+                  "qwen_image_2_1_edit",
                   "flux3_txt2img",
                   "flux3_img2img",
                   "flux3_inpaint",
                   "flux3_outpaint",
+                  "flux3_edit",
                   "moss_image_txt2img",
                   "moss_image_img2img",
                   "moss_image_inpaint",
@@ -58268,6 +58283,31 @@
         "enum": ["waiting", "downloading", "downloads_done", "running", "paused", "completed", "error", "cancelled"],
         "title": "InstallStatus",
         "description": "State of an install job running in the background."
+      },
+      "InstructionEdit": {
+        "properties": {
+          "requires_variant": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Requires Variant",
+            "description": "If set, only models of this variant edit; null means every variant does."
+          },
+          "img2img_start": {
+            "type": "boolean",
+            "title": "Img2Img Start",
+            "description": "Whether denoising starts from the noised source latent; false means it starts from noise."
+          }
+        },
+        "type": "object",
+        "required": ["img2img_start"],
+        "title": "InstructionEdit",
+        "description": "The model edits a source image from a text instruction; the source is reference image #1."
       },
       "IntegerBatchInvocation": {
         "category": "batch",
@@ -111611,15 +111651,22 @@
                 "$ref": "#/components/schemas/LatentsField"
               },
               {
+                "items": {
+                  "$ref": "#/components/schemas/LatentsField"
+                },
+                "type": "array"
+              },
+              {
                 "type": "null"
               }
             ],
             "default": null,
-            "description": "Reference image latents to guide generation. Encoded through the VAE.",
+            "description": "Reference image latents to guide generation. Encoded through the VAE. A single field is clamped to about one megapixel. A list takes every latent as it is, one image segment each, and the order matters: it is the order of the 'Picture N' labels in the prompt. It is the QwenImageEditPlusPipeline layout: size each image at its 'Image to Latents' node (at most one megapixel; larger latents are rejected). Chain collect nodes to build the list by hand: a single collect with several item edges has no defined order.",
             "field_kind": "input",
             "input": "connection",
             "orig_default": null,
-            "orig_required": false
+            "orig_required": false,
+            "title": "Reference Latents"
           },
           "denoise_mask": {
             "anyOf": [
@@ -111832,7 +111879,7 @@
         "tags": ["image", "qwen_image"],
         "title": "Denoise - Qwen Image",
         "type": "object",
-        "version": "1.2.0",
+        "version": "1.3.0",
         "output": {
           "$ref": "#/components/schemas/LatentsMetaOutput"
         }
@@ -112802,6 +112849,17 @@
             "title": "Reference Images",
             "type": "array"
           },
+          "reference_template": {
+            "default": "legacy",
+            "description": "How reference images are presented to the encoder. 'legacy' places unlabeled images at about 512x512 pixels each. 'edit_plus' labels them 'Picture 1:', 'Picture 2:', ... and fits each to about 384x384 pixels, as diffusers' QwenImageEditPlusPipeline does for several reference images.",
+            "enum": ["legacy", "edit_plus"],
+            "field_kind": "input",
+            "input": "any",
+            "orig_default": "legacy",
+            "orig_required": false,
+            "title": "Reference Template",
+            "type": "string"
+          },
           "qwen_vl_encoder": {
             "anyOf": [
               {
@@ -112841,7 +112899,7 @@
         "tags": ["prompt", "conditioning", "qwen_image"],
         "title": "Prompt - Qwen Image",
         "type": "object",
-        "version": "1.2.0",
+        "version": "1.3.0",
         "output": {
           "$ref": "#/components/schemas/QwenImageConditioningOutput"
         }

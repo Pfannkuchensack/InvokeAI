@@ -39,7 +39,14 @@ describe('getRouteAfterHighConfidenceEdit', () => {
     expect(getRouteAfterHighConfidenceEdit(route({ destination: 'gallery' }), 'canvas')).toEqual(
       route({ destination: 'canvas', sourceId: 'canvas' })
     );
-    expect(Object.keys(autoSwitchDestinations).sort()).toEqual(['canvas', 'generate', 'upscale', 'video', 'workflow']);
+    expect(Object.keys(autoSwitchDestinations).sort()).toEqual([
+      'canvas',
+      'generate',
+      'instruct',
+      'upscale',
+      'video',
+      'workflow',
+    ]);
   });
 
   it('preserves route identity for same-source and source-locked edits', () => {

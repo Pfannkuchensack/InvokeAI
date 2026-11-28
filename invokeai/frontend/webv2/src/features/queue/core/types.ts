@@ -26,7 +26,7 @@ export interface QueueBackendGraph {
 }
 
 export type QueueResultDestination = 'canvas' | 'gallery';
-export type QueueSourceId = 'canvas' | 'generate' | 'upscale' | 'video' | 'workflow';
+export type QueueSourceId = 'canvas' | 'generate' | 'instruct' | 'upscale' | 'video' | 'workflow';
 
 export interface QueueSubmissionPresentation {
   batchCount: number;
@@ -68,6 +68,17 @@ export interface QueueEnqueueResult {
   requested: number;
 }
 
+/** Which edit-tree step a run belongs to; results settle its nodes, fenced by project and tree root. */
+export interface QueueEditLink {
+  projectId: string;
+  rootNodeId: string;
+  stepId: string;
+  /** One node per variant, in the order the run produces its images. */
+  nodeIds: string[];
+  /** Every backend item that made or retried each node's image, by node index, oldest first. */
+  variantItemIds?: number[][];
+}
+
 /** Immutable source-compiled payload. Queue submits it without reading source widget state. */
 export type QueueCompiledSubmission =
   | {
@@ -87,6 +98,8 @@ export type QueueCompiledSubmission =
       batchCount: number;
       graph: QueueBackendGraph;
       kind: 'generate';
+      /** Present for an Edit step. */
+      edit?: QueueEditLink;
       negativePrompt: string;
       negativePromptNodeId: string;
       positivePrompt: string;

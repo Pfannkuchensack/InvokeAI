@@ -160,7 +160,7 @@ It checks only that the facets are *present*, not that their values are right.
 | `LatentSpaceFacet` | yes | Latent channels, spatial compression, latent→RGB projection | Step previews (`app/util/step_callback.py`), and which Tiny AutoEncoder renders them |
 | `ConditioningFacet` | yes | The `*ConditioningInfo` class the text encoder writes | The safe-globals list for conditioning deserialization |
 | `DefaultSettingsFacet` | yes | Steps, CFG or guidance, scheduler and size per variant (`None` is the fallback); optional `by_name_hint` | Stored on the model config at identification; prefills the UI |
-| `ModalityFacet` | yes | Modes (`txt2img`, `img2img`, `inpaint`, `outpaint`, video modes) and `metadata_slug` | Must equal `GENERATION_MODES`; which canvas tools the UI offers |
+| `ModalityFacet` | yes | Modes (`txt2img`, `img2img`, `inpaint`, `outpaint`, `edit`, video modes) and `metadata_slug` | Must equal `GENERATION_MODES`; which canvas tools the UI offers |
 | `FeaturesFacet` | yes | Negative prompt, `dimension_grid`, guidance label and range, scheduler set, control kinds, reference images, regional guidance, and more | Served to webv2 at `GET /api/v2/models/capabilities` |
 | `VaeFacet` | no | VAE bases (and channel counts) the architecture decodes with | Model loader VAE field, the Generate VAE picker, which VAEs Related Models lets you link, loader validation |
 | `VariantFacet` | no | Variant enum per `ModelType` | Variant consistency tests |

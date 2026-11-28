@@ -4,7 +4,13 @@ import pytest
 
 from invokeai.app.invocations.baseinvocation import InvocationRegistry
 from invokeai.backend.architectures import generative_bases
-from invokeai.backend.architectures.facets.features import ControlKind, FeaturesFacet
+from invokeai.backend.architectures.facets.features import (
+    ControlKind,
+    FeaturesFacet,
+    InstructionEditFacet,
+    NegativePrompt,
+)
+from invokeai.backend.architectures.facets.modality import ModalityFacet
 from invokeai.backend.architectures.registry import get
 from invokeai.backend.model_manager.taxonomy import BaseModelType
 
@@ -111,6 +117,39 @@ def test_reference_images_and_the_conditions_on_them() -> None:
     # Up to four images, attended together by `anima_denoise` (experimental: the adapter was trained on one).
     anima = get(BaseModelType.Anima, FeaturesFacet)
     assert anima is not None and anima.max_reference_images == 4
+
+
+def test_instruction_edit_is_declared_by_exactly_these_bases() -> None:
+    """Instruction edit is what the Edit workspace offers; accepting reference images is not enough."""
+    declared = {
+        b.value: f.instruction_edit
+        for b in generative_bases()
+        if (f := get(b, FeaturesFacet)) is not None and f.instruction_edit is not None
+    }
+    assert declared == {
+        "flux2": InstructionEditFacet(requires_variant=None, img2img_start=False),
+        "flux3": InstructionEditFacet(requires_variant=None, img2img_start=False),
+        "qwen-image": InstructionEditFacet(requires_variant="edit", img2img_start=False),
+        "qwen-image-2-1": InstructionEditFacet(requires_variant=None, img2img_start=False),
+    }
+
+
+def test_instruction_edit_is_declared_exactly_where_the_edit_mode_is() -> None:
+    """The modality and the feature facet say the same thing: `edit` mode iff instruction_edit."""
+    for base in generative_bases():
+        features, modality = get(base, FeaturesFacet), get(base, ModalityFacet)
+        has_edit_mode = modality is not None and "edit" in modality.modes
+        has_facet = features is not None and features.instruction_edit is not None
+        assert has_edit_mode == has_facet, base.value
+
+
+def test_instruction_edit_needs_a_reference_image_for_the_source() -> None:
+    with pytest.raises(ValueError, match="reference image"):
+        FeaturesFacet(
+            negative_prompt=NegativePrompt(visible=False, usage="never"),
+            dimension_grid=16,
+            instruction_edit=InstructionEditFacet(),
+        )
 
 
 def test_regional_guidance_and_its_negative_subset() -> None:

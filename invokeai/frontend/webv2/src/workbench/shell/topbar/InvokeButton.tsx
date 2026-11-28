@@ -357,7 +357,13 @@ export const InvokeButton = ({
   // The route and its lock show only in the card and a decorative mark, so the description carries them.
   const routeLabels = {
     // Video results always land in the Gallery, whatever destination the route holds.
-    destination: t(ROUTE_LABEL_KEYS[state.invocation.sourceId === 'video' ? 'gallery' : state.invocation.destination]),
+    destination: t(
+      ROUTE_LABEL_KEYS[
+        state.invocation.sourceId === 'video' || state.invocation.sourceId === 'instruct'
+          ? 'gallery'
+          : state.invocation.destination
+      ]
+    ),
     source: t(ROUTE_LABEL_KEYS[state.invocation.sourceId]),
   };
   const routeDescription = `${t(

@@ -2,7 +2,7 @@
 
 from invokeai.backend.architectures.facets.conditioning import ConditioningFacet
 from invokeai.backend.architectures.facets.default_settings import DefaultSettingsFacet
-from invokeai.backend.architectures.facets.features import FeaturesFacet, NegativePrompt
+from invokeai.backend.architectures.facets.features import FeaturesFacet, InstructionEditFacet, NegativePrompt
 from invokeai.backend.architectures.facets.latent_space import FLUX2_32, LatentSpaceFacet
 from invokeai.backend.architectures.facets.modality import ModalityFacet
 from invokeai.backend.architectures.facets.vae import VaeCompatibility, VaeFacet
@@ -28,7 +28,7 @@ register(
             None: MainModelDefaultSettings(steps=16, cfg_scale=1.0, width=1024, height=1024),
         }
     ),
-    ModalityFacet(frozenset({"txt2img", "img2img", "inpaint", "outpaint"}), metadata_slug="flux3"),
+    ModalityFacet(frozenset({"txt2img", "img2img", "inpaint", "outpaint", "edit"}), metadata_slug="flux3"),
     FeaturesFacet(
         # Klein Base takes classifier-free guidance with a negative prompt; Klein (the flow map) takes neither,
         # and `flux3_denoise` refuses a CFG scale above 1 for it.
@@ -40,6 +40,8 @@ register(
         # flow map was not told about, so there is no choice to offer.
         scheduler_set=None,
         max_reference_images=10,
+        # Klein and Klein Base both edit through their reference images, the source being #1; denoising starts from noise.
+        instruction_edit=InstructionEditFacet(requires_variant=None, img2img_start=False),
         # Regions are not masked: each becomes a box in the table that ends the caption (`flux3_layout_prompt`),
         # which has no negative counterpart, so `regional_negative` keeps its False default.
         supports_regional_guidance=True,

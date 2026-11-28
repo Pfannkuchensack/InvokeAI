@@ -22,12 +22,18 @@ import { resolveWidgetInstanceLabel } from '@workbench/widgetLabels';
 import { areWidgetPlacementProjectsEqual, getWidgetPlacementProject } from '@workbench/widgetPlacementMeta';
 import { useActiveProjectId, useActiveProjectSelector } from '@workbench/WorkbenchContext';
 import { useWorkbenchWidgetRegistry } from '@workbench/WorkbenchWidgetRegistryContext';
-import { memo, Suspense, use, useMemo, useState } from 'react';
+import { memo, Suspense, use, useMemo, useState, type ComponentType, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { useWidgetRuntime } from './createWidgetRuntime';
 import { WidgetFailureBoundary } from './WidgetFailureBoundary';
-import { WidgetHeader, WidgetHeaderActionsGroup, WidgetPanelFrame, WidgetTooltipFrame } from './WidgetFrames';
+import {
+  hasWidgetHeaderActions,
+  WidgetHeader,
+  WidgetHeaderActionsGroup,
+  WidgetPanelFrame,
+  WidgetTooltipFrame,
+} from './WidgetFrames';
 import { WidgetIdentityIcon } from './WidgetIdentityIcon';
 import { WidgetLoadingFallback } from './WidgetLoadingFallback';
 import { useWidgetRecovery } from './widgetRecovery';
@@ -52,6 +58,8 @@ interface WidgetChromeSlotByIdProps {
   region?: WorkbenchRegion;
   slot: WidgetChromeSlotName;
   widget: RegisteredWidget;
+  /** Wraps the `actions` slot's controls; a widget with none renders neither the controls nor this container. */
+  container?: ComponentType<{ children: ReactNode }>;
 }
 
 export const WidgetRendererById = ({ instanceId, widget, ...props }: WidgetRendererByIdProps) => {
@@ -64,7 +72,13 @@ export const WidgetRendererById = ({ instanceId, widget, ...props }: WidgetRende
 };
 
 /** Resolve widget chrome with the view's implementation/runtime for center and floating hosts. */
-export const WidgetChromeSlotById = ({ instanceId, region = 'center', slot, widget }: WidgetChromeSlotByIdProps) => {
+export const WidgetChromeSlotById = ({
+  container,
+  instanceId,
+  region = 'center',
+  slot,
+  widget,
+}: WidgetChromeSlotByIdProps) => {
   const selection = useActiveProjectSelector(
     (project) => ({ instance: project.widgetInstances[instanceId], projectId: project.id }),
     areProjectWidgetRenderInstancesEqual
@@ -81,12 +95,19 @@ export const WidgetChromeSlotById = ({ instanceId, region = 'center', slot, widg
       region={region}
       widget={widget}
       fallback={failureFallback}
+      failureContainer={container}
       slot={slot}
     >
       {slot === 'icon' ? (
         <WidgetImplementationIcon widget={widget} />
       ) : (
-        <WidgetChromeSlot instance={selection.instance} region={region} slot={slot} widget={widget} />
+        <WidgetChromeSlot
+          container={container}
+          instance={selection.instance}
+          region={region}
+          slot={slot}
+          widget={widget}
+        />
       )}
     </WidgetRecoveryBoundary>
   ) : null;
@@ -98,11 +119,13 @@ const WidgetImplementationIcon = ({ widget }: { widget: RegisteredWidget }) => {
 };
 
 const WidgetChromeSlot = ({
+  container: Container,
   instance,
   region,
   slot,
   widget,
 }: {
+  container?: ComponentType<{ children: ReactNode }>;
   instance: WidgetInstanceContract;
   region: WorkbenchRegion;
   slot: WidgetChromeSlotName;
@@ -162,7 +185,11 @@ const WidgetChromeSlot = ({
     );
   }
 
-  return (
+  if (!hasWidgetHeaderActions({ actions, HeaderMenu: implementation.headerMenu, manifest: widget.manifest, region })) {
+    return null;
+  }
+
+  const group = (
     <WidgetHeaderActionsGroup
       HeaderMenu={implementation.headerMenu}
       SettingsActions={implementation.settingsActions}
@@ -173,6 +200,8 @@ const WidgetChromeSlot = ({
       runtime={runtime}
     />
   );
+
+  return Container ? <Container>{group}</Container> : group;
 };
 
 export const WidgetRenderer = ({ instance, presentation = 'expanded', region, widget }: WidgetRendererProps) => {
@@ -197,6 +226,7 @@ export const WidgetRenderer = ({ instance, presentation = 'expanded', region, wi
 
 const WidgetRecoveryBoundary = ({
   children,
+  failureContainer,
   fallback,
   instance,
   presentation,
@@ -208,6 +238,7 @@ const WidgetRecoveryBoundary = ({
   instance: WidgetInstanceRuntimeMeta;
   children: React.ReactNode;
   fallback?: React.ReactNode;
+  failureContainer?: ComponentType<{ children: ReactNode }>;
   slot: string;
   framed?: boolean;
 }) => {
@@ -227,6 +258,7 @@ const WidgetRecoveryBoundary = ({
           ? null
           : fallback
       }
+      failureContainer={failureContainer}
       framed={framed}
       isRetrying={recovery.retrying || recovery.reloading}
       instance={instance}

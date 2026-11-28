@@ -2,11 +2,11 @@ import type { InvocationSourceId, ResultDestination } from './invocationContract
 import type { WidgetInstanceId, WidgetTypeId } from './widgetContracts';
 
 /** Presets name arrangements, not invocation sources; graphWidgets owns source resolution. */
-export type BuiltInLayoutPresetId = 'compose' | 'edit' | 'automate' | 'video';
+export type BuiltInLayoutPresetId = 'compose' | 'edit' | 'instruct' | 'automate' | 'video';
 
 export type LayoutPresetId = BuiltInLayoutPresetId | (string & {});
 
-export type CenterViewId = 'canvas' | 'gallery' | 'preview' | 'workflow';
+export type CenterViewId = 'canvas' | 'gallery' | 'instruct' | 'preview' | 'workflow';
 
 export interface PanelState {
   isLeftOpen: boolean;

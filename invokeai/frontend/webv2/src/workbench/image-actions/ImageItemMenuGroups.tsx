@@ -36,6 +36,7 @@ import {
   SlidersHorizontalIcon,
   SproutIcon,
   TypeIcon,
+  WandSparklesIcon,
   type LucideIcon,
 } from 'lucide-react';
 import { useCallback, useMemo } from 'react';
@@ -172,6 +173,7 @@ const SingleImageHandOffItems = ({
   const { generation, widgets } = useWorkbenchCommands();
   const openWidget = useOpenWorkbenchWidget();
   const handleEditOnCanvas = useCallback(() => void actions.sendToCanvas([image], 'raster'), [actions, image]);
+  const handleOpenInEdit = useCallback(() => actions.openImageInEdit(image), [actions, image]);
   const handleSendToUpscale = useCallback(() => {
     openWidget('upscale', { preferredRegions: ['left'] });
     widgets.patchValues('upscale', {
@@ -198,6 +200,13 @@ const SingleImageHandOffItems = ({
         label={t('widgets.preview.editOnCanvas')}
         value="edit-on-canvas"
         onSelect={handleEditOnCanvas}
+      />
+      <MenuActionItem
+        hint={guided ? t('widgets.gallery.itemMenu.openInEditHint') : undefined}
+        icon={WandSparklesIcon}
+        label={t('widgets.gallery.itemMenu.openInEdit')}
+        value="open-in-edit"
+        onSelect={handleOpenInEdit}
       />
       <UpscaleSubMenu guided={guided} image={image} onSendToUpscale={handleSendToUpscale} />
       <MenuActionItem

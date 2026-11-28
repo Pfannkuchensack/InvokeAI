@@ -181,7 +181,7 @@ const InvokeRoute = ({ state }: { state: InvocationState }) => {
         <HStack minH="5">
           <Text {...ROUTE_LABEL_PROPS}>{t('topbar.routing.destination')}</Text>
         </HStack>
-        {invocation.sourceId === 'video' ? (
+        {invocation.sourceId === 'video' || invocation.sourceId === 'instruct' ? (
           <Text {...ROUTE_VALUE_PROPS}>{t(ROUTE_LABEL_KEYS.gallery)}</Text>
         ) : (
           <RoutingDestinationSegments
@@ -210,7 +210,11 @@ const FixedRoute = ({ state }: { state: InvocationState }) => {
       <Stack align="start" gap="1">
         <Text {...ROUTE_LABEL_PROPS}>{t('topbar.routing.destination')}</Text>
         <Text {...ROUTE_VALUE_PROPS}>
-          {t(ROUTE_LABEL_KEYS[invocation.sourceId === 'video' ? 'gallery' : invocation.destination])}
+          {t(
+            ROUTE_LABEL_KEYS[
+              invocation.sourceId === 'video' || invocation.sourceId === 'instruct' ? 'gallery' : invocation.destination
+            ]
+          )}
         </Text>
       </Stack>
     </Stack>

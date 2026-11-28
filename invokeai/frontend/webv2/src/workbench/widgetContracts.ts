@@ -16,6 +16,7 @@ export type FirstPartyWidgetTypeId =
   | 'generate'
   | 'history-controls'
   | 'image-map'
+  | 'instruct'
   | 'layers'
   | 'notifications'
   | 'preview'

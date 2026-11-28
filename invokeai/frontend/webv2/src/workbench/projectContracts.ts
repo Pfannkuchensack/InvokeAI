@@ -17,6 +17,7 @@ import type {
   WidgetRegion,
   WidgetRegionState,
 } from './layoutContracts';
+import type { StoredEditTree } from './projectEditTree';
 import type { ProjectEvent } from './projectEventContracts';
 import type { ProjectWorkflowCollection, ProjectWorkflowHistories } from './projectWorkflows';
 import type { WorkbenchQueueState } from './queueHistoryContracts';
@@ -43,6 +44,8 @@ export interface Project {
   /** Inactive presets' differing arrangements, oldest first, one per preset; never the active preset's. */
   presetWorkingLayouts?: LayoutPresetWorkingCopy[];
   widgetGraphs: Partial<Record<WidgetTypeId, GraphContract>>;
+  /** The Edit workspace's history; absent until an image is sent to Edit. */
+  editTree?: StoredEditTree;
   canvas: CanvasStateContractV3;
   promptHistory: PromptHistoryItem[];
   undoRedo: UndoRedoHistory;

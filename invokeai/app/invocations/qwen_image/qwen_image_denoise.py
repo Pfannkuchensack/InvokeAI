@@ -1,7 +1,7 @@
 import math
 from contextlib import ExitStack
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, ClassVar, Iterator, Optional, TypeAlias
+from typing import TYPE_CHECKING, Any, Callable, ClassVar, Iterator, Optional, Sequence, TypeAlias
 
 import torch
 import torchvision.transforms as tv_transforms
@@ -93,7 +93,7 @@ def _explicit_shift(shift: float | None) -> float | None:
     title="Denoise - Qwen Image",
     tags=["image", "qwen_image"],
     category="image",
-    version="1.2.0",
+    version="1.3.0",
     classification=Classification.Prototype,
 )
 class QwenImageDenoiseInvocation(BaseInvocation, WithMetadata):
@@ -104,9 +104,14 @@ class QwenImageDenoiseInvocation(BaseInvocation, WithMetadata):
         default=None, description=FieldDescriptions.latents, input=Input.Connection
     )
     # Reference image latents (encoded through VAE) to concatenate with noisy latents.
-    reference_latents: Optional[LatentsField] = InputField(
+    reference_latents: LatentsField | list[LatentsField] | None = InputField(
         default=None,
-        description="Reference image latents to guide generation. Encoded through the VAE.",
+        description="Reference image latents to guide generation. Encoded through the VAE. A single field is "
+        "clamped to about one megapixel. A list takes every latent as it is, one image segment each, and the order "
+        "matters: it is the order of the 'Picture N' labels in the prompt. It is the QwenImageEditPlusPipeline "
+        "layout: size each image at its 'Image to Latents' node (at most one megapixel; larger latents are "
+        "rejected). Chain collect nodes to build the list by hand: a single collect with several item edges "
+        "has no defined order.",
         input=Input.Connection,
     )
     # denoise_mask is used for image-to-image inpainting. Only the masked region is modified.
@@ -204,6 +209,33 @@ class QwenImageDenoiseInvocation(BaseInvocation, WithMetadata):
             return scheduler, math.log(explicit_shift)
         image_seq_len = (height // LATENT_SCALE_FACTOR) * (width // LATENT_SCALE_FACTOR) // patch_size**2
         return scheduler, ShiftFit.from_scheduler_config(scheduler.config).mu(image_seq_len)
+
+    def _reference_latent_fields(self) -> list[LatentsField]:
+        if self.reference_latents is None:
+            return []
+        return [self.reference_latents] if isinstance(self.reference_latents, LatentsField) else self.reference_latents
+
+    def _validate_reference_list(
+        self, references: list[torch.Tensor], out_channels: int, is_edit_transformer: bool
+    ) -> None:
+        """Check the list form's references: one (1, C, h, w) latent each, within diffusers' VAE_IMAGE_SIZE."""
+        if not references and is_edit_transformer:
+            raise ValueError("The reference latents list is empty: connect at least one reference image.")
+        for index, ref in enumerate(references, start=1):
+            if ref.dim() != 4 or ref.shape[0] != 1 or ref.shape[1] != out_channels:
+                raise ValueError(
+                    f"Reference latents {index} have shape {tuple(ref.shape)}; expected (1, {out_channels}, h, w) "
+                    "from a single image encoded by 'Image to Latents - Qwen Image'."
+                )
+            width, height = ref.shape[-1] * self._VAE_SCALE_FACTOR, ref.shape[-2] * self._VAE_SCALE_FACTOR
+            # diffusers' calculate_dimensions rounds each side of a one-megapixel image to a multiple of 32, which
+            # lands up to ~10% above the area (16:9 gives 1376x768). Its output is at most
+            # area + 16 * (width + height) + 768 pixels, so that is the bound: no such size is rejected.
+            if width * height > self._REF_TARGET_PIXEL_AREA + 16 * (width + height) + 768:
+                raise ValueError(
+                    f"Reference latents {index} are {width}x{height} pixels, above the one megapixel the model was trained "
+                    "for. Set the width and height of its 'Image to Latents' node to the image fitted to one megapixel."
+                )
 
     def _prep_inpaint_mask(self, context: InvocationContext, latents: torch.Tensor) -> torch.Tensor | None:
         if self.denoise_mask is None:
@@ -314,16 +346,21 @@ class QwenImageDenoiseInvocation(BaseInvocation, WithMetadata):
         latent_width: int,
         ref_latent_height: int | None = None,
         ref_latent_width: int | None = None,
+        *,
+        ref_latent_dims: Sequence[tuple[int, int]] = (),
     ) -> list[list[tuple[int, int, int]]]:
         """Build the img_shapes argument for the transformer.
 
-        The reference segment (if present) must use its own dims so QwenEmbedRope's
+        Each reference segment (if present) must use its own dims so QwenEmbedRope's
         spatial frequencies position ref tokens distinctly from noisy tokens —
         otherwise reference content bleeds into the generation as a ghost.
+        `ref_latent_dims` lists the (height, width) of several references in sequence order; the single
+        `ref_latent_height`/`ref_latent_width` pair is the one-reference form.
         """
         shapes: list[tuple[int, int, int]] = [(1, latent_height // 2, latent_width // 2)]
         if ref_latent_height is not None and ref_latent_width is not None:
             shapes.append((1, ref_latent_height // 2, ref_latent_width // 2))
+        shapes.extend((1, rh // 2, rw // 2) for rh, rw in ref_latent_dims)
         return [shapes]
 
     # diffusers' QwenImageEdit(Plus)Pipeline VAE_IMAGE_SIZE = 1024 * 1024 pixels;
@@ -439,15 +476,20 @@ class QwenImageDenoiseInvocation(BaseInvocation, WithMetadata):
             if init_latents.dim() == 5:
                 init_latents = init_latents.squeeze(2)
 
-        # Load reference image latents if provided
-        ref_latents = None
-        if self.reference_latents is not None:
-            ref_latents = context.tensors.load(self.reference_latents.latents_name)
-            ref_latents = ref_latents.to(device=device, dtype=inference_dtype)
+        # Load reference image latents if provided. A single field keeps the original behaviour; a list is the
+        # QwenImageEditPlusPipeline layout, one segment per image.
+        multi_reference = isinstance(self.reference_latents, list)
+        ref_latents_list: list[torch.Tensor] = []
+        for ref_field in self._reference_latent_fields():
+            ref = context.tensors.load(ref_field.latents_name).to(device=device, dtype=inference_dtype)
             # The VAE encoder produces 5D latents (B, C, 1, H, W); squeeze the frame dim
             # so we have 4D (B, C, H, W) for packing.
-            if ref_latents.dim() == 5:
-                ref_latents = ref_latents.squeeze(2)
+            if ref.dim() == 5:
+                ref = ref.squeeze(2)
+            ref_latents_list.append(ref)
+        ref_latents = ref_latents_list[0] if ref_latents_list and not multi_reference else None
+        if multi_reference:
+            self._validate_reference_list(ref_latents_list, out_channels, has_zero_cond_t)
 
         # Generate noise (16 channels - the output latent channels)
         noise = self._get_noise(
@@ -482,7 +524,22 @@ class QwenImageDenoiseInvocation(BaseInvocation, WithMetadata):
         ref_latents_packed = None
         ref_latent_height = latent_height
         ref_latent_width = latent_width
-        if use_ref_latents:
+        ref_latent_dims: list[tuple[int, int]] = []
+        if multi_reference and ref_latents_list:
+            # Diffusers' Edit Plus pipeline feeds every reference as the VAE produced it at its own
+            # calculate_dimensions(1024**2) size: no clamp, so a reference is never resampled in latent space, and
+            # it feeds them whatever the transformer's zero_cond_t. Unlike the single-field path below, which keeps
+            # Generate's behaviour (references only with zero_cond_t; the loader's zero_cond_t handling is a
+            # separate change), the list is opt-in and takes diffusers' semantics.
+            packed_refs = []
+            for ref in ref_latents_list:
+                _, _, rh, rw = ref.shape
+                aligned_h, aligned_w = self._align_ref_latent_dims(rh, rw)
+                ref = ref[..., :aligned_h, :aligned_w].contiguous()
+                ref_latent_dims.append((aligned_h, aligned_w))
+                packed_refs.append(self._pack_latents(ref, ref.shape[0], out_channels, aligned_h, aligned_w))
+            ref_latents_packed = torch.cat(packed_refs, dim=1)
+        elif use_ref_latents:
             if ref_latents is not None:
                 # Defense-in-depth: backend callers (direct API, older graph JSON)
                 # may wire qwen_image_i2l without explicit width/height, producing
@@ -507,7 +564,9 @@ class QwenImageDenoiseInvocation(BaseInvocation, WithMetadata):
         # positional encoding and the model can't disentangle them, producing a
         # ghost/doubling artifact across the whole frame. Matches diffusers'
         # QwenImageEditPipeline / QwenImageEditPlusPipeline.
-        if use_ref_latents:
+        if ref_latent_dims:
+            img_shapes = self._build_img_shapes(latent_height, latent_width, ref_latent_dims=ref_latent_dims)
+        elif use_ref_latents:
             img_shapes = self._build_img_shapes(latent_height, latent_width, ref_latent_height, ref_latent_width)
         else:
             img_shapes = self._build_img_shapes(latent_height, latent_width)
@@ -719,7 +778,7 @@ class QwenImageDenoiseInvocation(BaseInvocation, WithMetadata):
             raise ValueError(
                 "Qwen Image ControlNet needs the VAE that encodes its images: connect one to the 'vae' input."
             )
-        if self.reference_latents is not None:
+        if self._reference_latent_fields():
             raise ValueError("Qwen Image ControlNet cannot be combined with reference latents.")
         # Both ControlNets were trained beside the generation transformer. An Edit transformer takes a
         # [noisy ; reference] sequence and modulates the two apart (zero_cond_t), a layout neither ever saw.

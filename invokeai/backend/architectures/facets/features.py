@@ -49,6 +49,24 @@ class NegativePrompt:
 
 
 @dataclass(frozen=True)
+class InstructionEditFacet:
+    """The model edits a source image from a text instruction, not merely accepts reference images.
+
+    The source image is reference image #1, so an architecture declaring this takes at least one. Declaring it
+    makes webv2 offer the base in its Edit workspace, so the base needs a branch in webv2's `compileEditGraph`
+    first; the base must also declare the `edit` mode in its `ModalityFacet`.
+    """
+
+    requires_variant: str | None = None
+    """The one variant that edits, where a base alone cannot answer (Qwen-Image's `edit` variant, FLUX.1 Kontext once
+    it is a variant). None: every variant of the base does."""
+
+    img2img_start: bool = False
+    """Whether denoising starts from the noised source latent rather than pure noise, a per-model choice. False: the
+    source enters only as a reference, as in the FLUX.2 pipelines."""
+
+
+@dataclass(frozen=True)
 class FeaturesFacet(Facet):
     """What the UI may offer for this architecture."""
 
@@ -132,6 +150,8 @@ class FeaturesFacet(Facet):
     The frontend's encoder filter for this flag is Qwen3-VL 8B, Qwen-Image-2.1's; another base that sets it with a
     different encoder needs its own filter there."""
 
+    instruction_edit: InstructionEditFacet | None = None
+
     supports_regional_guidance: bool = False
     regional_negative: bool = False
     """Whether regional negative conditionings retain their spatial masks."""
@@ -155,6 +175,12 @@ class FeaturesFacet(Facet):
             raise ValueError(
                 "FeaturesFacet.scheduler_set_by_variant has a None key; `scheduler_set` is already the "
                 "answer for every variant not named here."
+            )
+
+        if self.instruction_edit is not None and self.max_reference_images < 1:
+            raise ValueError(
+                "FeaturesFacet declares instruction_edit but accepts no reference images; "
+                "the source image is reference image #1."
             )
 
         if self.guidance_max is not None and self.guidance_max < self.guidance_min:

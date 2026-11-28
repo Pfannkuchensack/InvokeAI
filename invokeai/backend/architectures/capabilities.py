@@ -44,6 +44,17 @@ class NegativePromptPolicy(BaseModel):
     )
 
 
+class InstructionEdit(BaseModel):
+    """The model edits a source image from a text instruction; the source is reference image #1."""
+
+    requires_variant: str | None = Field(
+        default=None, description="If set, only models of this variant edit; null means every variant does."
+    )
+    img2img_start: bool = Field(
+        description="Whether denoising starts from the noised source latent; false means it starts from noise."
+    )
+
+
 class ArchitectureFeatures(BaseModel):
     """What a UI may offer for this architecture."""
 
@@ -76,6 +87,9 @@ class ArchitectureFeatures(BaseModel):
         default=False,
         description="If true, reference images are read by the Qwen3-VL vision tower: the effective encoder "
         "(the model's own or a standalone one) must carry one.",
+    )
+    instruction_edit: InstructionEdit | None = Field(
+        default=None, description="Null unless the architecture has instruction-edit models."
     )
     supports_regional_guidance: bool = False
     regional_negative: bool = Field(
@@ -143,6 +157,14 @@ def _features_of(facet: FeaturesFacet, variant: AnyVariant | None = None) -> Arc
         max_reference_images=facet.max_reference_images,
         reference_images_require_variant=facet.reference_images_require_variant,
         reference_images_require_vision_tower=facet.reference_images_require_vision_tower,
+        instruction_edit=(
+            InstructionEdit(
+                requires_variant=facet.instruction_edit.requires_variant,
+                img2img_start=facet.instruction_edit.img2img_start,
+            )
+            if facet.instruction_edit is not None
+            else None
+        ),
         supports_regional_guidance=facet.supports_regional_guidance,
         regional_negative=facet.regional_negative,
         clip_skip_max=facet.clip_skip_max,

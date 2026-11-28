@@ -493,6 +493,7 @@ describe('CanvasHeaderActions frame menu', () => {
       'New regional reference image',
       'New control layer',
       'New raster layer',
+      'Source image in Edit',
     ]);
     const layerKeys = [
       ...menuItem(/^Fit frame to layers/)
@@ -522,10 +523,14 @@ describe('CanvasHeaderActions use frame as', () => {
     await frameTrigger().click();
     const group = page.getByRole('group', { name: /^Use frame as/ });
     await expect.element(group).toMatchTextContent(/Snapshot, won’t update/);
-    expect(group.getByRole('menuitem').elements()).toHaveLength(4);
+    expect(group.getByRole('menuitem').elements()).toHaveLength(5);
 
     await menuItem(/^New control layer/).click();
     expect(harness.create).toHaveBeenCalledExactlyOnceWith('control');
+
+    await frameTrigger().click();
+    await menuItem(/^Source image in Edit/).click();
+    expect(harness.create).toHaveBeenLastCalledWith('edit');
   });
 });
 

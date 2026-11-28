@@ -2,7 +2,7 @@
 
 from invokeai.backend.architectures.facets.conditioning import ConditioningFacet
 from invokeai.backend.architectures.facets.default_settings import DefaultSettingsFacet
-from invokeai.backend.architectures.facets.features import FeaturesFacet, NegativePrompt
+from invokeai.backend.architectures.facets.features import FeaturesFacet, InstructionEditFacet, NegativePrompt
 from invokeai.backend.architectures.facets.latent_space import QWEN_IMAGE21_64, LatentSpaceFacet
 from invokeai.backend.architectures.facets.modality import ModalityFacet
 from invokeai.backend.architectures.facets.variant import VariantFacet
@@ -26,7 +26,7 @@ register(
             None: MainModelDefaultSettings(scheduler="euler", steps=40, cfg_scale=1.0, width=1024, height=1024),
         }
     ),
-    ModalityFacet(frozenset({"txt2img", "img2img", "inpaint", "outpaint"}), metadata_slug="qwen_image_2_1"),
+    ModalityFacet(frozenset({"txt2img", "img2img", "inpaint", "outpaint", "edit"}), metadata_slug="qwen_image_2_1"),
     FeaturesFacet(
         # True CFG only runs when a negative prompt is given and the scale is above 1.
         negative_prompt=NegativePrompt(visible=True, usage="cfg-gated"),
@@ -37,6 +37,8 @@ register(
         # Each reference holds ~1 megapixel of latents in the prefix the cache keeps: ~2 GiB per guidance branch.
         max_reference_images=4,
         reference_images_require_vision_tower=True,
+        # Every variant edits through its reference images, the source being #1; denoising starts from noise.
+        instruction_edit=InstructionEditFacet(requires_variant=None, img2img_start=False),
     ),
     # Values are qwen_image_21_* because variant strings resolve without the base and must be unique.
     VariantFacet({ModelType.Main: QwenImage21VariantType}),

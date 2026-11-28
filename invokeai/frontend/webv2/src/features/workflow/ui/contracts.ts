@@ -16,7 +16,7 @@ export type WorkflowWidgetPanelRegion = 'left' | 'right' | 'bottom' | 'center';
  * Mirror invocation source IDs structurally; adapter and WidgetActionsMenu wiring provide type checks across the
  * ownership boundary.
  */
-export type WorkflowInvocationSourceId = 'generate' | 'workflow' | 'upscale' | 'video' | 'canvas';
+export type WorkflowInvocationSourceId = 'generate' | 'workflow' | 'upscale' | 'video' | 'canvas' | 'instruct';
 
 export interface WorkflowRuntimeApi {
   instanceId: string;

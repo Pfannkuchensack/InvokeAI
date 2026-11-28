@@ -31,7 +31,7 @@ import {
 import { getWidgetById, getWidgetsForRegion } from '@workbench/widgetRegistry';
 import { useActiveProjectId, useActiveProjectSelector, useWorkbenchCommands } from '@workbench/WorkbenchContext';
 import { CheckIcon, ChevronDownIcon, XIcon } from 'lucide-react';
-import { Activity, Suspense, useCallback, useMemo, useRef } from 'react';
+import { Activity, Suspense, useCallback, useMemo, useRef, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { ChromeIsland, getChromeIslandMinWidth } from './ChromeIsland';
@@ -248,26 +248,45 @@ export const CenterArea = () => {
           </Box>
 
           {activeItem && activeItem.widget.manifest.chrome?.header !== 'hidden' ? (
-            <ChromeIsland flexShrink={0} maxW={END_ISLAND_MAX_WIDTH}>
-              {centerToolbarItems.map((toolbarItem) => (
-                <WidgetRendererById
-                  key={toolbarItem.id}
-                  instanceId={toolbarItem.id}
-                  widget={toolbarItem.widget}
-                  presentation="compact"
-                  region="center"
-                />
-              ))}
+            centerToolbarItems.length > 0 ? (
+              <EndChromeIsland>
+                {centerToolbarItems.map((toolbarItem) => (
+                  <WidgetRendererById
+                    key={toolbarItem.id}
+                    instanceId={toolbarItem.id}
+                    widget={toolbarItem.widget}
+                    presentation="compact"
+                    region="center"
+                  />
+                ))}
+                <Suspense fallback={null}>
+                  <WidgetChromeSlotById instanceId={activeItem.id} slot="actions" widget={activeItem.widget} />
+                </Suspense>
+              </EndChromeIsland>
+            ) : (
+              // Without toolbar items the island exists only for the widget's own actions; one with none gets no
+              // empty pill. Nothing shows until the implementation loads, which is when its actions are known.
               <Suspense fallback={null}>
-                <WidgetChromeSlotById instanceId={activeItem.id} slot="actions" widget={activeItem.widget} />
+                <WidgetChromeSlotById
+                  container={EndChromeIsland}
+                  instanceId={activeItem.id}
+                  slot="actions"
+                  widget={activeItem.widget}
+                />
               </Suspense>
-            </ChromeIsland>
+            )
           ) : null}
         </Flex>
       </Box>
     </Flex>
   );
 };
+
+const EndChromeIsland = ({ children }: { children: ReactNode }) => (
+  <ChromeIsland flexShrink={0} maxW={END_ISLAND_MAX_WIDTH}>
+    {children}
+  </ChromeIsland>
+);
 
 const CenterViewMenu = ({
   activeItem,

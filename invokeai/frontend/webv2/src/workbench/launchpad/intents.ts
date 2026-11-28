@@ -3,7 +3,7 @@ import type { BuiltInLayoutPresetId } from '@workbench/layoutContracts';
 
 /** Built-in arrangement and invocation source per URL intent; ids live here so routes validate without presets. */
 
-export type LaunchpadIntentId = 'generate' | 'canvas' | 'upscale' | 'video' | 'workflow';
+export type LaunchpadIntentId = 'generate' | 'canvas' | 'instruct' | 'upscale' | 'video' | 'workflow';
 
 export interface LaunchpadIntent {
   id: LaunchpadIntentId;
@@ -14,6 +14,7 @@ export interface LaunchpadIntent {
 export const LAUNCHPAD_INTENT_IDS: readonly LaunchpadIntentId[] = [
   'generate',
   'canvas',
+  'instruct',
   'upscale',
   'video',
   'workflow',
@@ -22,6 +23,7 @@ export const LAUNCHPAD_INTENT_IDS: readonly LaunchpadIntentId[] = [
 const INTENTS: Record<LaunchpadIntentId, LaunchpadIntent> = {
   canvas: { id: 'canvas', presetId: 'edit', sourceId: 'canvas' },
   generate: { id: 'generate', presetId: 'compose', sourceId: 'generate' },
+  instruct: { id: 'instruct', presetId: 'instruct', sourceId: 'instruct' },
   upscale: { id: 'upscale', presetId: 'compose', sourceId: 'upscale' },
   video: { id: 'video', presetId: 'video', sourceId: 'video' },
   workflow: { id: 'workflow', presetId: 'automate', sourceId: 'workflow' },
@@ -35,13 +37,15 @@ export const BUILT_IN_LAYOUT_PRESET_LABEL_KEYS: Record<BuiltInLayoutPresetId, st
   automate: 'topbar.presets.builtInLabels.automate',
   compose: 'topbar.presets.builtInLabels.compose',
   edit: 'topbar.presets.builtInLabels.edit',
+  instruct: 'topbar.presets.builtInLabels.instruct',
   video: 'topbar.presets.builtInLabels.video',
 };
 
 export const BUILT_IN_LAYOUT_PRESET_LABELS: Record<BuiltInLayoutPresetId, string> = {
   automate: 'Workflow',
   compose: 'Compose',
-  edit: 'Edit',
+  edit: 'Canvas',
+  instruct: 'Edit',
   video: 'Video',
 };
 

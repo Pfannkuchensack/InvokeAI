@@ -2,7 +2,7 @@ import type { GenerationIssue } from '@features/generation/contracts';
 import type { InvocationTemplatesSnapshot, WorkflowReadinessReason } from '@features/workflow/contracts';
 import type { CanvasInputIssue } from '@workbench/canvasGenerationInputs';
 
-export type InvocationSourceId = 'generate' | 'workflow' | 'upscale' | 'video' | 'canvas';
+export type InvocationSourceId = 'generate' | 'workflow' | 'upscale' | 'video' | 'canvas' | 'instruct';
 
 export type InvocationMode = 'global' | 'dialog';
 

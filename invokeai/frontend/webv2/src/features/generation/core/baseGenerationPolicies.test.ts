@@ -37,6 +37,7 @@ import {
   getGenerationUiPolicy,
   getGenerationValidationIssues,
   getGenerationValidationReasons,
+  getInstructionEditSupport,
   getCompatibleReferenceImages,
   getModelDefaultComponents,
   getModelDefaultFills,
@@ -2341,5 +2342,77 @@ describe('getGuidanceSliderMax', () => {
   it('never crosses the input ceiling or drops below the floor', () => {
     expect(getGuidanceSliderMax(25, 30)).toBe(30);
     expect(getGuidanceSliderMax(25, 25)).toBe(25);
+  });
+});
+
+describe('getInstructionEditSupport', () => {
+  it('describes the edit models, counting the source among the references', () => {
+    expect(getInstructionEditSupport(createModel('flux2'))).toEqual({
+      img2imgStart: false,
+      maxReferenceImages: 5,
+    });
+    expect(getInstructionEditSupport({ ...createModel('flux2'), variant: 'klein_9b_base' })).toEqual({
+      img2imgStart: false,
+      maxReferenceImages: 5,
+    });
+    expect(getInstructionEditSupport(createModel('qwen-image-2-1'))).toEqual({
+      img2imgStart: false,
+      maxReferenceImages: 4,
+    });
+  });
+
+  it('offers only the bases Edit has a family for, whatever the backend declares', () => {
+    const rows = architectureCapabilitiesFixture.map((row) =>
+      row.base === 'sdxl'
+        ? {
+            ...row,
+            features: {
+              ...row.features,
+              instruction_edit: { img2img_start: false, requires_variant: null },
+            },
+          }
+        : row
+    );
+
+    try {
+      setArchitectureCapabilities(rows);
+
+      expect(getInstructionEditSupport(createModel('sdxl'))).toBeNull();
+    } finally {
+      setArchitectureCapabilities(architectureCapabilitiesFixture);
+    }
+  });
+
+  it('refuses bases without the block, external providers and a missing model', () => {
+    expect(getInstructionEditSupport(createModel('sdxl'))).toBeNull();
+    expect(getInstructionEditSupport(createModel('flux'))).toBeNull();
+    expect(getInstructionEditSupport(externalModel)).toBeNull();
+    expect(getInstructionEditSupport(undefined)).toBeNull();
+  });
+
+  it('honours a variant requirement and the served img2img_start', () => {
+    const rows = architectureCapabilitiesFixture.map((row) =>
+      row.base === 'flux2' && row.features.instruction_edit
+        ? {
+            ...row,
+            features: {
+              ...row.features,
+              instruction_edit: { img2img_start: true, requires_variant: 'dev' },
+            },
+          }
+        : row
+    );
+
+    try {
+      setArchitectureCapabilities(rows);
+
+      expect(getInstructionEditSupport({ ...createModel('flux2'), variant: 'dev' })).toEqual({
+        img2imgStart: true,
+        maxReferenceImages: 5,
+      });
+      expect(getInstructionEditSupport({ ...createModel('flux2'), variant: 'klein_9b_base' })).toBeNull();
+    } finally {
+      setArchitectureCapabilities(architectureCapabilitiesFixture);
+    }
   });
 });

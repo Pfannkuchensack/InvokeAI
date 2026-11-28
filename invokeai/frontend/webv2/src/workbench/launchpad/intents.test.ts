@@ -16,6 +16,11 @@ describe('launchpad intents', () => {
     expect(resolveLaunchpadIntent('workflow')).toEqual({ id: 'workflow', presetId: 'automate', sourceId: 'workflow' });
   });
 
+  it('opens an instruction edit in its own workspace and source', () => {
+    expect(resolveLaunchpadIntent('instruct')).toEqual({ id: 'instruct', presetId: 'instruct', sourceId: 'instruct' });
+    expect(resolveLaunchpadIntent('canvas')?.presetId).toBe('edit');
+  });
+
   it('sets a source that a preset alone could not imply', () => {
     const generate = resolveLaunchpadIntent('generate');
     const upscale = resolveLaunchpadIntent('upscale');

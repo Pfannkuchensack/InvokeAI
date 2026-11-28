@@ -1,6 +1,7 @@
 import type { GalleryItemRef } from '@features/gallery/contracts';
 import type { CanvasNodeContract } from '@workbench/canvas-engine/contracts';
 
+import { readStoredEditTree } from '@workbench/projectEditTree';
 import { createInitialWorkbenchState, workbenchReducer } from '@workbench/workbenchState.testing';
 import { describe, expect, it } from 'vitest';
 
@@ -200,6 +201,52 @@ describe('collectMediaUsage', () => {
     expect(collectMediaUsage(sameName, [video('same-name'), image('same-name')])).toEqual([
       { refs: [video('same-name')], surface: 'video' },
       { refs: [image('same-name')], surface: 'otherProjectState' },
+    ]);
+  });
+
+  it('reports the images of an Edit tree under Edit: its nodes, its references and the composer references', () => {
+    const doc = project({
+      fields: {
+        editTree: {
+          nodes: [
+            { id: 'root', imageName: 'source.png', parentId: null, referenceImages: [] },
+            { id: 'a', imageName: 'edited.png', parentId: 'root', referenceImages: [{ imageName: 'ref.png' }] },
+          ],
+          rootNodeId: 'root',
+          selection: {},
+        },
+      },
+      widgets: { instruct: { references: [{ height: 64, image_name: 'composer-ref.png', width: 64 }] } },
+    });
+
+    expect(
+      collectMediaUsage(doc, [
+        image('source.png'),
+        image('edited.png'),
+        image('ref.png'),
+        image('composer-ref.png'),
+        image('other.png'),
+      ])
+    ).toEqual([
+      {
+        refs: [image('source.png'), image('edited.png'), image('ref.png'), image('composer-ref.png')],
+        surface: 'edit',
+      },
+    ]);
+  });
+
+  it('reports the images inside an Edit tree this build cannot read', () => {
+    const doc = project({
+      fields: {
+        editTree: readStoredEditTree({
+          nodes: [{ id: 'root', imageName: 'kept.png', parentId: null, status: 'rendering' }],
+          rootNodeId: 'root',
+        }),
+      },
+    });
+
+    expect(collectMediaUsage(doc, [image('kept.png')])).toEqual([
+      { refs: [image('kept.png')], surface: 'otherProjectState' },
     ]);
   });
 

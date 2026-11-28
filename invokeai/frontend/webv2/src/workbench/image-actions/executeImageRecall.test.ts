@@ -1,11 +1,19 @@
 import type { GalleryImage } from '@features/gallery';
 import type * as GalleryBackendModule from '@features/gallery/data/backend';
-import type { GenerateModelConfig, GenerateWidgetValues } from '@features/generation/contracts';
+import type { GenerateModelConfig, GenerateWidgetValues, MainModelConfig } from '@features/generation/contracts';
 import type { ModelConfig } from '@features/models';
 import type { WorkbenchCommands } from '@workbench/workbenchStore';
 import type { TFunction } from 'i18next';
 
+import {
+  recallCatalogFor,
+  recallTunedSettingsFor,
+  satisfiedSettingsFor,
+} from '@features/generation/core/graphCoverage.testing';
+import { compileEditGraph, fitToOptimalArea } from '@features/generation/editGraph';
 import { getDefaultGenerateSettings } from '@features/generation/settings';
+import { normalizeInstructValues } from '@features/instruct';
+import { takeInstructEntry } from '@features/instruct/core/entryRequests';
 import { accountLifecycle } from '@platform/state/accountLifecycle';
 import { ApiError } from '@platform/transport/http';
 import { QueryClient } from '@tanstack/react-query';
@@ -38,7 +46,9 @@ import {
   seedArchitectureCapabilities,
 } from '@features/models/core/architectureCapabilities.testing';
 
+import { recallIntoEdit } from './editRecall';
 import { executeImageRecall, getCurrentGenerateValues } from './executeImageRecall';
+import { recordOf } from './recallContract.testing';
 
 const model = {
   base: 'sdxl',
@@ -1420,4 +1430,320 @@ it('reports bounded reference truncation while hydrating the supported records i
   expect(add).toHaveBeenCalledWith(
     expect.objectContaining({ title: 'widgets.gallery.itemActions.recall.partiallyRecalled' })
   );
+});
+
+describe('executeImageRecall of an Edit workspace image', () => {
+  const edit = satisfiedSettingsFor('flux2', { label: 'dev', overrides: { format: 'diffusers', variant: 'dev' } });
+  const reference = (id: string, imageName: string) => ({
+    config: {
+      image: { original: { image: { height: 256, image_name: imageName, width: 256 } } },
+      type: 'flux2_reference_image',
+    },
+    id,
+    isEnabled: true,
+  });
+  const record = {
+    edit_source_image_name: 'source.png',
+    generation_mode: 'flux2_edit',
+    model: { base: 'flux2', hash: 'hash', key: edit.model.key, name: edit.model.name, type: 'main' },
+    positive_prompt: 'make the sky evening',
+    ref_images: [reference('r1', 'source.png'), reference('r2', 'extra.png')],
+    seed: 7,
+  };
+  const recall = (kind: 'all' | 'remix' | 'prompts', editRecall?: (input: unknown) => Promise<string>) => {
+    const created = createCommands();
+
+    return {
+      ...created,
+      result: executeImageRecall({
+        queryClient,
+        t,
+        commands: created.commands,
+        editRecall: editRecall as never,
+        getGenerateValues: () => ({ modelKey: edit.model.key }),
+        image,
+        kind,
+        models: [edit.model as ModelConfig],
+        projectId: 'project-1',
+      }),
+    };
+  };
+
+  beforeEach(() => {
+    queryClient = new QueryClient();
+    accountLifecycle.activate('test-account');
+    galleryApi.galleryImages.metadata.mockResolvedValue(record);
+    galleryApi.galleryImages.resolveMany.mockImplementation((names: string[]) =>
+      Promise.resolve(names.map((name) => ({ ...image, height: 256, imageName: name, width: 256 })))
+    );
+  });
+
+  it.each(['all', 'remix'] as const)(
+    'hands a %s recall to Edit with the source, the instruction and the references',
+    async (kind) => {
+      const editRecall = vi.fn(() => Promise.resolve('recalled'));
+      const { result, setSettings } = recall(kind, editRecall);
+
+      await expect(result).resolves.toBe(true);
+
+      expect(editRecall).toHaveBeenCalledExactlyOnceWith({
+        kind,
+        source: { height: 256, image_name: 'source.png', width: 256 },
+        sourceName: 'source.png',
+        values: expect.objectContaining({
+          model: expect.objectContaining({ key: edit.model.key }),
+          positivePrompt: 'make the sky evening',
+          referenceImages: [expect.objectContaining({ id: 'r1' }), expect.objectContaining({ id: 'r2' })],
+        }),
+      });
+      expect(setSettings).not.toHaveBeenCalled();
+    }
+  );
+
+  it('leaves the references of the Generate panel out of what Edit takes', async () => {
+    galleryApi.galleryImages.metadata.mockResolvedValue({ ...record, ref_images: undefined });
+    const editRecall = vi.fn(() => Promise.resolve('recalled'));
+
+    await recall('all', editRecall).result;
+
+    expect(editRecall).toHaveBeenCalledWith(
+      expect.objectContaining({ values: expect.objectContaining({ referenceImages: [] }) })
+    );
+  });
+
+  it('gives the source as null once it was deleted', async () => {
+    galleryApi.galleryImages.resolveMany.mockResolvedValue([{ ...image, imageName: 'extra.png' }]);
+    const editRecall = vi.fn(() => Promise.resolve('recalled'));
+
+    await recall('all', editRecall).result;
+
+    expect(editRecall).toHaveBeenCalledWith(expect.objectContaining({ source: null, sourceName: 'source.png' }));
+  });
+
+  it('looks the source up even when the record lists no references', async () => {
+    galleryApi.galleryImages.metadata.mockResolvedValue({ ...record, ref_images: undefined });
+    const editRecall = vi.fn(() => Promise.resolve('recalled'));
+
+    await recall('all', editRecall).result;
+
+    expect(editRecall).toHaveBeenCalledWith(
+      expect.objectContaining({ source: { height: 256, image_name: 'source.png', width: 256 } })
+    );
+  });
+
+  it('recalls into Generate when the recorded model is not installed, whatever Generate holds', async () => {
+    galleryApi.galleryImages.metadata.mockResolvedValue({
+      ...record,
+      model: { ...record.model, hash: 'other', key: 'gone-model', name: 'Gone' },
+    });
+    const editRecall = vi.fn(() => Promise.resolve('recalled'));
+
+    const { result } = recall('all', editRecall);
+
+    await result;
+
+    expect(editRecall).not.toHaveBeenCalled();
+  });
+
+  it('keeps the partial-recall notices on the Edit path, and tells a failed source lookup from a deleted one', async () => {
+    galleryApi.galleryImages.resolveMany.mockRejectedValue(new TypeError('Failed to fetch'));
+    const editRecall = vi.fn(() => Promise.resolve('recalled'));
+    const { add, result } = recall('all', editRecall);
+
+    await result;
+
+    expect(editRecall).toHaveBeenCalledWith(expect.objectContaining({ source: null }));
+    const partial = add.mock.calls
+      .map(([notice]) => notice)
+      .filter((notice) => notice.title === 'widgets.gallery.itemActions.recall.partiallyRecalled');
+
+    // One notice, not the lookup failure and the generic reference notice side by side.
+    expect(partial).toHaveLength(1);
+    expect(partial[0].message).toBe('widgets.gallery.itemActions.recall.editSourceLookupFailed');
+  });
+
+  it('reports nothing and sets nothing when the project was left during the recall', async () => {
+    const { add, result, setSettings } = recall('all', () => Promise.resolve('stale'));
+
+    await expect(result).resolves.toBe(false);
+
+    expect(add).not.toHaveBeenCalled();
+    expect(setSettings).not.toHaveBeenCalled();
+  });
+
+  it('says the source is gone when it was deleted', async () => {
+    galleryApi.galleryImages.resolveMany.mockResolvedValue([{ ...image, imageName: 'extra.png' }]);
+    const { add, result } = recall(
+      'all',
+      vi.fn(() => Promise.resolve('recalled'))
+    );
+
+    await result;
+
+    expect(add.mock.calls.map(([notice]) => notice.message).join(' ')).toContain(
+      'widgets.gallery.itemActions.recall.editSourceMissing'
+    );
+  });
+
+  it('recalls into Generate when Edit cannot take the record', async () => {
+    const { result, setSettings } = recall('all', () => Promise.resolve('declined'));
+
+    await expect(result).resolves.toBe(true);
+
+    expect(setSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ positivePrompt: 'make the sky evening' }),
+      'project-1'
+    );
+  });
+
+  it('keeps recall of single settings, and of other images, in Generate', async () => {
+    const editRecall = vi.fn(() => Promise.resolve('recalled'));
+    const prompts = recall('prompts', editRecall);
+
+    await prompts.result;
+    // The first read is cached for this image.
+    queryClient = new QueryClient();
+    galleryApi.galleryImages.metadata.mockResolvedValue({
+      ...record,
+      edit_source_image_name: undefined,
+      generation_mode: 'flux2',
+    });
+    await recall('all', editRecall).result;
+
+    expect(editRecall).not.toHaveBeenCalled();
+    expect(prompts.setSettings).toHaveBeenCalled();
+  });
+});
+
+// The Edit values a step ran with come back from the record it wrote: compile, recall, compare.
+describe.each([
+  // FLUX.2 runs Euler or Heun; the tuned fixture's scheduler is not one of them and would be recorded as Euler.
+  {
+    base: 'flux2' as const,
+    scheduler: 'heun',
+    shape: { label: 'dev', overrides: { format: 'diffusers', variant: 'dev' } },
+  },
+  {
+    base: 'flux3' as const,
+    scheduler: 'euler',
+    shape: { label: 'klein-base', overrides: { format: 'diffusers', variant: 'flux3_klein_base' } },
+  },
+  // Qwen-Image records no scheduler, so recall settles on the model's default; its shift and the encoder quantization
+  // are what the record carries beyond the others.
+  {
+    base: 'qwen-image' as const,
+    scheduler: 'euler_a',
+    shape: { label: 'edit', overrides: { format: 'diffusers', variant: 'edit' } },
+  },
+  {
+    base: 'qwen-image-2-1' as const,
+    scheduler: 'euler',
+    shape: { label: 'diffusers', overrides: { format: 'diffusers' } },
+  },
+  {
+    base: 'qwen-image-2-1' as const,
+    label: 'gguf encoder and vision tower',
+    scheduler: 'euler',
+    shape: { ggufEncoder: true as const, label: 'gguf', overrides: { format: 'gguf_quantized' } },
+  },
+])('an Edit record round-trips into Edit ($base $label)', ({ base: edited, scheduler, shape }) => {
+  const base = recallTunedSettingsFor(edited, shape);
+  // A GGUF encoder runs only beside its Vision Tower, which the tuned fixture leaves out.
+  const components =
+    'ggufEncoder' in shape
+      ? {
+          ...(({ qwen3VLEncoderModel, qwen3VLVisionTowerModel }) => ({ qwen3VLEncoderModel, qwen3VLVisionTowerModel }))(
+            satisfiedSettingsFor(edited, shape).settings
+          ),
+          vae: {
+            base: edited,
+            key: `${edited}-vae`,
+            name: 'vae',
+            type: 'vae' as const,
+            variant: null,
+          },
+        }
+      : {};
+  // Only Qwen-Image's Edit takes a shift and an encoder quantization; a record of another family has neither.
+  // The graph records no component source when it is the main model itself (#10280), so a recall reads none back.
+  const qwenOnly =
+    edited === 'qwen-image'
+      ? { componentSourceModel: null }
+      : { qwenImageEncoderQuantization: 'none' as const, qwenImageShift: null };
+  const tuned = { ...base, settings: { ...base.settings, ...components, ...qwenOnly, scheduler } };
+  const extra = { height: 256, image_name: 'extra.png', width: 256 };
+  const source = { height: 256, image_name: 'source.png', width: 256 };
+  const projectSettings = { useCpuNoise: true, useNsfwChecker: false, useWatermark: false };
+
+  const run = async (kind: 'all' | 'remix') => {
+    const compiled = compileEditGraph({
+      model: tuned.model as MainModelConfig,
+      projectSettings,
+      referenceImages: [extra],
+      settings: tuned.settings,
+      size: fitToOptimalArea(source, tuned.model as MainModelConfig),
+      source,
+    });
+
+    queryClient = new QueryClient();
+    accountLifecycle.activate('test-account');
+    galleryApi.galleryImages.metadata.mockResolvedValue(
+      recordOf(compiled, { negativePrompt: '', positivePrompt: 'make it evening', seed: 7 })
+    );
+    galleryApi.galleryImages.resolveMany.mockImplementation((names: string[]) =>
+      Promise.resolve(names.map((name) => ({ ...image, height: 256, imageName: name, width: 256 })))
+    );
+    const target = {
+      commands: { layout: { activatePreset: vi.fn() }, widgets: { patchValues: vi.fn(), select: vi.fn() } } as never,
+      getProject: () =>
+        ({
+          layout: { presetId: 'compose' },
+          widgetInstances: {},
+          widgetRegions: { center: { instanceIds: [] } },
+        }) as never,
+      isActiveProject: () => true,
+      projectId: 'project-1',
+    };
+    const { commands } = createCommands();
+
+    await executeImageRecall({
+      commands,
+      editRecall: (input) => recallIntoEdit(target, input),
+      getGenerateValues: () => ({}),
+      image,
+      kind,
+      models: recallCatalogFor(tuned.model, tuned.settings).models as ModelConfig[],
+      projectId: 'project-1',
+      queryClient,
+      t,
+    });
+
+    return takeInstructEntry('project-1');
+  };
+
+  it('restores the model, pipeline settings, instruction, extra references and size mode, with the recorded seed', async () => {
+    const entry = await run('all');
+    const expected = normalizeInstructValues({ model: tuned.model, settings: tuned.settings });
+
+    expect(entry).toMatchObject({ continueFromImage: true, image: { height: 256, image_name: 'source.png' } });
+    expect(entry?.values).toMatchObject({
+      instruction: 'make it evening',
+      model: { key: tuned.model.key },
+      references: [extra],
+      seed: 7,
+    });
+    expect(entry?.values?.settings).toEqual(expected.settings);
+    // The size is what Edit picks for the source, so it stays automatic.
+    expect(entry?.values).toMatchObject({
+      ...fitToOptimalArea(source, tuned.model as MainModelConfig),
+      sizeMode: 'auto',
+    });
+  });
+
+  it('leaves the seed of Edit alone when remixing', async () => {
+    const entry = await run('remix');
+
+    expect(entry?.values).not.toHaveProperty('seed');
+    expect(entry?.values).toMatchObject({ instruction: 'make it evening' });
+  });
 });

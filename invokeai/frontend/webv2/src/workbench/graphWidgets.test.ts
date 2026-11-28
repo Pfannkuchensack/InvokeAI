@@ -37,6 +37,7 @@ describe('graph widget sources', () => {
       'canvas',
       'upscale',
       'video',
+      'instruct',
       'workflow',
     ]);
   });

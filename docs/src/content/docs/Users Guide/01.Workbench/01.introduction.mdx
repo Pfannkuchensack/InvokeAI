@@ -63,7 +63,7 @@ The Preview's **Auto-switch** button, in its header, shows the current mode as i
 
 Choosing a finished item yourself, in the Gallery or with the Preview's arrows, turns Auto-switch **Off** so your choice stays on screen, until you choose a mode again. Choosing an image that is still generating, a generating tile in the Gallery or the filmstrip, turns it to **In progress** and keeps that image on screen while it generates, even when another one starts beside it. The canvas staging area's own Auto-switch follows the same rules. The setting is saved with the project. Projects created before this setting existed open with it **Off**.
 
-The Preview's header holds the next steps for the image it shows. Click the board and item name at its start to open a mini gallery and jump to another image or video. **Edit** opens Edit on Canvas, Upscale, Send to Video, Add to Canvas as… and New project from image; **Use** offers the image as a reference, a control or a prompt template, and reuses its settings: **Remix image** (<kbd>R</kbd>), **All settings** (<kbd>A</kbd>), **Use prompt** (<kbd>P</kbd>), **Use seed** (<kbd>S</kbd>), **Use size** (<kbd>D</kbd>) and **Use CLIP skip**. Each item says what it does. The **⋮** menu holds the rest: copy, download, Load workflow, Select for compare, Move to board, Delete and more. A Preview narrower than 560 pixels, and a Preview in a side rail at any width, shows **Edit** and **Use** as icons and moves **Select for compare** into **⋮**. Below 280 pixels only the star and **⋮** remain, and **⋮** holds everything.
+The Preview's header holds the next steps for the image it shows. Click the board and item name at its start to open a mini gallery and jump to another image or video. **Continue** opens Edit on Canvas, Open in Edit, Upscale, Send to Video, Add to Canvas as… and New project from image; **Use** offers the image as a reference, a control or a prompt template, and reuses its settings: **Remix image** (<kbd>R</kbd>), **All settings** (<kbd>A</kbd>), **Use prompt** (<kbd>P</kbd>), **Use seed** (<kbd>S</kbd>), **Use size** (<kbd>D</kbd>) and **Use CLIP skip**. Each item says what it does. The **⋮** menu holds the rest: copy, download, Load workflow, Select for compare, Move to board, Delete and more. A Preview narrower than 560 pixels, and a Preview in a side rail at any width, shows **Continue** and **Use** as icons and moves **Select for compare** into **⋮**. Below 280 pixels only the star and **⋮** remain, and **⋮** holds everything.
 
 **Select for compare** keeps the shown image to compare with the next image you select. While it waits, the button stays pressed, the Preview says *Pick another image to compare with this one*, and the image's Gallery thumbnail is labelled **Compare**. Select another image in the Gallery or the filmstrip, or step to one with the arrow keys, and the comparison opens. To call it off, click the button again, click **Cancel** in the Preview, or press <kbd>Esc</kbd>; selecting several items, clearing the selection, or a new result that Auto-switch shows calls it off too. <kbd>Esc</kbd> also closes an open comparison, and selecting the **Compare** image while comparing swaps the two.
 
@@ -92,7 +92,7 @@ A window remembers where it was. Dock or remove a floating panel and float it ag
 
 If the panel you float was also the only view in the center, the center shows where it went, with **Show window** and a dock button. Docking or removing the window gives the center its view back.
 
-A floating Preview is handy on the **Edit** layout: keep the canvas in the center and watch results in a small window beside your work.
+A floating Preview is handy on the **Canvas** layout: keep the canvas in the center and watch results in a small window beside your work.
 
 ### When Invoke is blocked
 
@@ -162,16 +162,17 @@ A **layout preset** is a saved arrangement of panels. The tabs in the middle of 
 
 ### Built-in presets
 
-Invoke comes with four presets:
+Invoke comes with five presets:
 
 | Preset | Center | Left rail | Right rail |
 | --- | --- | --- | --- |
 | **Compose**: generate images from text | Preview (Gallery also available) | Generate, Upscale | Gallery, Image Map, Queue |
-| **Edit**: edit and refine images | Canvas (Preview also available) | Generate, Upscale | Layers, Preview |
+| **Canvas**: paint, compose and refine images | Canvas (Preview also available) | Generate, Upscale | Layers, Preview |
+| **Edit**: change an image step by step with instructions | Edit chat (Preview also available) | Edit settings | Gallery, Queue |
 | **Video**: generate video | Preview | Video, Upscale | Gallery, Queue |
 | **Workflow**: build and run workflows | Workflow editor (Preview also available) | Workflow | Queue, Preview, Gallery, Image Map |
 
-Each preset also sets where **Invoke** takes its settings from and where results go. For example, Compose generates from the Generate panel into the Gallery, while Edit works from and into the Canvas. A route you have locked from the **Invoke** card is left alone.
+Each preset also sets where **Invoke** takes its settings from and where results go. For example, Compose generates from the Generate panel into the Gallery, while Canvas works from and into the Canvas. A route you have locked from the **Invoke** card is left alone.
 
 New projects open with Compose unless you choose a different starting point when you create them.
 

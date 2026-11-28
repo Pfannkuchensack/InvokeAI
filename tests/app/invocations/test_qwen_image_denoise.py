@@ -1,7 +1,7 @@
 """Tests for the Qwen Image denoise invocation."""
 
 import json
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -9,6 +9,7 @@ import pytest
 import torch
 from diffusers.schedulers.scheduling_flow_match_euler_discrete import FlowMatchEulerDiscreteScheduler
 
+from invokeai.app.invocations.fields import LatentsField
 from invokeai.app.invocations.qwen_image import qwen_image_denoise
 from invokeai.app.invocations.qwen_image.qwen_image_denoise import QwenImageDenoiseInvocation
 from invokeai.backend.stable_diffusion.diffusion.conditioning_data import (
@@ -407,3 +408,186 @@ def test_a_negative_shift_sets_the_same_mu_as_no_shift(monkeypatch, tmp_path) ->
 
     assert negative == pytest.approx(0.5 + 0.4 * 3840 / 7936, abs=1e-12)
     assert negative == auto
+
+
+class TestBuildImgShapesMultipleReferences:
+    def test_one_row_per_reference_in_order(self):
+        result = QwenImageDenoiseInvocation._build_img_shapes(64, 64, ref_latent_dims=[(128, 96), (64, 160)])
+        assert result == [[(1, 32, 32), (1, 64, 48), (1, 32, 80)]]
+
+
+class _EditTransformer(_TinyQwenImageTransformer):
+    """An Edit-style transformer stub: records the reference tokens it is fed and predicts from its input."""
+
+    def __init__(self, zero_cond_t: bool = True) -> None:
+        self.zero_cond_t = zero_cond_t
+        self.config = SimpleNamespace(patch_size=2, out_channels=16, zero_cond_t=zero_cond_t)
+        self.calls: list[dict] = []
+
+    def modules(self):
+        return iter(())
+
+    def __call__(self, *, hidden_states, img_shapes, **_kwargs):
+        noisy_seq_len = (64 // 16) ** 2
+        self.calls.append(
+            {
+                "seq_len": hidden_states.shape[1],
+                "img_shapes": img_shapes,
+                "reference_tokens": hidden_states[:, noisy_seq_len:].clone(),
+            }
+        )
+        return (hidden_states * 0.5,)
+
+
+def _run_edit_denoise(
+    monkeypatch, tmp_path: Path, reference_latents, saved: dict[str, torch.Tensor], *, zero_cond_t: bool = True
+):
+    """Run the node end to end on CPU against a recording stub; return (output, transformer, wm bytes)."""
+    transformer = _EditTransformer(zero_cond_t)
+    working_memory: list[int] = []
+    monkeypatch.setattr(qwen_image_denoise, "QwenImageTransformer2DModel", _EditTransformer)
+    monkeypatch.setattr(qwen_image_denoise.TorchDevice, "choose_torch_device", lambda: torch.device("cpu"))
+    monkeypatch.setattr(qwen_image_denoise, "requires_sidecar_patching", lambda *_a: False)
+    monkeypatch.setattr(qwen_image_denoise, "peak_dequant_transient_bytes", lambda *_a: 0)
+    monkeypatch.setattr(qwen_image_denoise, "sage_attention_scope", lambda: nullcontext())
+    monkeypatch.setattr(qwen_image_denoise.LayerPatcher, "apply_smart_model_patches", lambda **_kwargs: nullcontext())
+
+    @contextmanager
+    def lock(*, working_mem_bytes):
+        working_memory.append(working_mem_bytes)
+        yield ({}, transformer)
+
+    conditioning = ConditioningFieldData(conditionings=[QwenImageConditioningInfo(prompt_embeds=torch.zeros(1, 4, 8))])
+    context = SimpleNamespace(
+        models=SimpleNamespace(
+            load=lambda _identifier: SimpleNamespace(model=transformer, model_on_device=lock),
+            get_config=lambda _identifier: SimpleNamespace(format=None),
+            get_absolute_path=lambda _config: tmp_path / "qwen-image.gguf",
+        ),
+        conditioning=SimpleNamespace(load=lambda _name: conditioning),
+        tensors=SimpleNamespace(load=lambda name: saved[name]),
+        util=SimpleNamespace(sd_step_callback=lambda *_a: None),
+    )
+    node = QwenImageDenoiseInvocation.model_construct(
+        latents=None,
+        reference_latents=reference_latents,
+        denoise_mask=None,
+        control=None,
+        denoising_start=0.0,
+        denoising_end=1.0,
+        transformer=SimpleNamespace(transformer=SimpleNamespace(), loras=[]),
+        positive_conditioning=SimpleNamespace(conditioning_name="positive"),
+        negative_conditioning=None,
+        cfg_scale=1.0,
+        width=64,
+        height=64,
+        steps=2,
+        seed=0,
+        shift=None,
+    )
+    return node._run_diffusion(context), transformer, working_memory
+
+
+def _pack(latents: torch.Tensor) -> torch.Tensor:
+    """Independent 2x2 packing of (1, C, 1, h, w) or (1, C, h, w) latents to (1, h/2*w/2, C*4)."""
+    latents = latents.to(torch.bfloat16).reshape(latents.shape[0], latents.shape[1], *latents.shape[-2:])
+    b, c, h, w = latents.shape
+    return latents.reshape(b, c, h // 2, 2, w // 2, 2).permute(0, 2, 4, 1, 3, 5).reshape(b, h * w // 4, c * 4)
+
+
+def _field(name: str) -> LatentsField:
+    return LatentsField(latents_name=name)
+
+
+class TestMultipleReferenceLatents:
+    @staticmethod
+    def _saved() -> dict[str, torch.Tensor]:
+        gen = torch.Generator().manual_seed(1)
+        return {
+            "a": torch.randn(1, 16, 1, 16, 12, generator=gen),
+            "b": torch.randn(1, 16, 1, 8, 24, generator=gen),
+        }
+
+    def test_list_feeds_the_references_packed_in_the_given_order(self, monkeypatch, tmp_path):
+        saved = self._saved()
+        shapes = {"a": (1, 8, 6), "b": (1, 4, 12)}
+        for order in (["a", "b"], ["b", "a"]):
+            _, transformer, _ = _run_edit_denoise(monkeypatch, tmp_path, [_field(n) for n in order], saved)
+            call = transformer.calls[0]
+            assert call["img_shapes"] == [[(1, 4, 4), *(shapes[n] for n in order)]]
+            expected = torch.cat([_pack(saved[n]) for n in order], dim=1)
+            torch.testing.assert_close(call["reference_tokens"], expected, rtol=0, atol=0)
+            assert call["seq_len"] == 16 + expected.shape[1]
+
+    def test_working_memory_counts_every_reference(self, monkeypatch, tmp_path):
+        saved = self._saved()
+        _, _, one = _run_edit_denoise(monkeypatch, tmp_path, [_field("a")], saved)
+        _, _, two = _run_edit_denoise(monkeypatch, tmp_path, [_field("a"), _field("b")], saved)
+        # 0.25 MiB per token (bf16): the second reference adds 4 x 12 = 48 tokens.
+        assert two[0] - one[0] == 48 * 256 * 1024
+
+    def test_list_of_one_feeds_what_the_single_field_feeds(self, monkeypatch, tmp_path):
+        saved = self._saved()
+        single, t_single, wm_single = _run_edit_denoise(monkeypatch, tmp_path, _field("a"), saved)
+        listed, t_list, wm_list = _run_edit_denoise(monkeypatch, tmp_path, [_field("a")], saved)
+
+        assert t_list.calls[0]["img_shapes"] == t_single.calls[0]["img_shapes"]
+        torch.testing.assert_close(
+            t_list.calls[0]["reference_tokens"], t_single.calls[0]["reference_tokens"], rtol=0, atol=0
+        )
+        assert wm_list == wm_single
+        torch.testing.assert_close(listed, single, rtol=0, atol=0)
+
+    def test_single_field_keeps_the_clamp_and_zero_cond_t_gate(self, monkeypatch, tmp_path):
+        big = {"big": torch.zeros(1, 16, 1, 256, 256)}  # 2048x2048 pixels
+        _, single, _ = _run_edit_denoise(monkeypatch, tmp_path, _field("big"), big)
+        assert single.calls[0]["img_shapes"] == [[(1, 4, 4), (1, 64, 64)]]
+
+        # Without zero_cond_t the single field is dropped, as it always was (the loader fix is a separate change).
+        _, plain, _ = _run_edit_denoise(monkeypatch, tmp_path, _field("a"), self._saved(), zero_cond_t=False)
+        assert plain.calls[0]["img_shapes"] == [[(1, 4, 4)]]
+        assert plain.calls[0]["seq_len"] == 16
+
+    def test_list_feeds_references_even_without_zero_cond_t(self, monkeypatch, tmp_path):
+        saved = self._saved()
+        _, transformer, _ = _run_edit_denoise(
+            monkeypatch, tmp_path, [_field("a"), _field("b")], saved, zero_cond_t=False
+        )
+        assert transformer.calls[0]["img_shapes"] == [[(1, 4, 4), (1, 8, 6), (1, 4, 12)]]
+        torch.testing.assert_close(
+            transformer.calls[0]["reference_tokens"],
+            torch.cat([_pack(saved["a"]), _pack(saved["b"])], dim=1),
+            rtol=0,
+            atol=0,
+        )
+
+    def test_without_references_the_edit_transformer_still_gets_a_zero_segment(self, monkeypatch, tmp_path):
+        _, transformer, _ = _run_edit_denoise(monkeypatch, tmp_path, None, {})
+        assert transformer.calls[0]["img_shapes"] == [[(1, 4, 4), (1, 4, 4)]]
+
+    @pytest.mark.parametrize(
+        ("latents", "message"),
+        [
+            (torch.zeros(1, 16, 1, 136, 136), "above the one megapixel"),  # 1088x1088
+            (torch.zeros(1, 16, 1, 256, 256), "above the one megapixel"),  # 2048x2048
+            (torch.zeros(1, 4, 1, 16, 16), "expected"),
+            (torch.zeros(1, 16, 2, 16, 16), "expected"),
+            (torch.zeros(2, 16, 1, 16, 16), "expected"),
+        ],
+    )
+    def test_list_rejects_unusable_references(self, monkeypatch, tmp_path, latents, message):
+        with pytest.raises(ValueError, match=message):
+            _run_edit_denoise(monkeypatch, tmp_path, [_field("x")], {"x": latents})
+
+    @pytest.mark.parametrize("ratio", [16 / 9, 9 / 16, 4 / 3, 3 / 4, 1.0, 3 / 2, 21 / 9, 1 / 3, 7 / 5])
+    def test_list_accepts_every_calculate_dimensions_size(self, monkeypatch, tmp_path, ratio):
+        from diffusers.pipelines.qwenimage.pipeline_qwenimage_edit_plus import VAE_IMAGE_SIZE, calculate_dimensions
+
+        width, height = calculate_dimensions(VAE_IMAGE_SIZE, ratio)
+        latents = {"x": torch.zeros(1, 16, 1, height // 8, width // 8)}
+        _, transformer, _ = _run_edit_denoise(monkeypatch, tmp_path, [_field("x")], latents)
+        assert transformer.calls[0]["img_shapes"] == [[(1, 4, 4), (1, height // 16, width // 16)]]
+
+    def test_empty_list_on_an_edit_transformer_raises(self, monkeypatch, tmp_path):
+        with pytest.raises(ValueError, match="empty"):
+            _run_edit_denoise(monkeypatch, tmp_path, [], {})

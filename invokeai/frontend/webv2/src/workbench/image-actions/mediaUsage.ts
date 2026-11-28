@@ -9,6 +9,7 @@ import type { Project } from '@workbench/projectContracts';
 
 import { toGalleryItemKey } from '@features/gallery/contracts';
 import { collectMediaNames, MAX_HELD_NAME_LENGTH, type MediaNameRefs } from '@workbench/mediaReferences';
+import { getEditableEditTree } from '@workbench/projectEditTree';
 import { getProjectWidgetValues } from '@workbench/widgetState';
 
 export interface MediaUsage {
@@ -37,6 +38,8 @@ const STACK_KINDS = Object.keys(STACK_SURFACES) as StackKind[];
 const PROJECT_FIELDS = {
   // The surfaces read only part of it; the rest, later additions included, is scanned.
   canvas: 'scanned',
+  // A readable tree has its own surface; one this build cannot read is only found by this fail-safe scan.
+  editTree: 'scanned',
   // Session-only; names every generated image.
   events: 'excluded',
   floatingWidgets: 'scanned',
@@ -120,6 +123,7 @@ export const collectMediaUsage = (project: Project, selected: readonly GalleryIt
   };
 
   add('generateReferenceImages', [getProjectWidgetValues(project, 'generate').referenceImages]);
+  add('edit', [getEditableEditTree(project.editTree)?.nodes, getProjectWidgetValues(project, 'instruct').references]);
 
   for (const kind of STACK_KINDS) {
     add(STACK_SURFACES[kind], [project.canvas.document.stacks[kind]]);
@@ -150,16 +154,17 @@ export const collectMediaUsage = (project: Project, selected: readonly GalleryIt
 
 const SURFACE_ORDER = {
   generateReferenceImages: 0,
-  canvasRaster: 1,
-  canvasControl: 2,
-  canvasRegionalGuidance: 3,
-  canvasInpaintMask: 4,
-  canvasStaging: 5,
-  canvasSnapshot: 6,
-  upscale: 7,
-  video: 8,
-  workflow: 9,
-  otherProjectState: 10,
+  edit: 1,
+  canvasRaster: 2,
+  canvasControl: 3,
+  canvasRegionalGuidance: 4,
+  canvasInpaintMask: 5,
+  canvasStaging: 6,
+  canvasSnapshot: 7,
+  upscale: 8,
+  video: 9,
+  workflow: 10,
+  otherProjectState: 11,
 } as const satisfies Record<GalleryMediaUsageSurface, number>;
 
 /** Surfaces match by id across copies; `otherProjectState` keeps only refs no listed surface of either reports. */

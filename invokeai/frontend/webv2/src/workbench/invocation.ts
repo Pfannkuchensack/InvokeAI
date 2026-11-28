@@ -46,6 +46,7 @@ import {
 import { isCompositableRegionalGuidanceLayer } from '@workbench/canvasLayerContent';
 
 import { describeCanvasInputIssue, getCanvasInputIssues } from './canvasGenerationInputs';
+import { getEditRouteValidationReasons } from './editSubmission';
 import { getActiveProjectGraph } from './projectWorkflows';
 import { getWorkbenchPreferences } from './settings/store';
 import { getProjectWidgetValues } from './widgetState';
@@ -61,7 +62,8 @@ export const getDynamicPromptsExpansionSource = (
   project: Project,
   sourceId: InvocationSourceId
 ): (DynamicPromptsExpansionSource & { sampleSeed: number }) | null => {
-  if (sourceId === 'workflow') {
+  // Edit sends its instruction as typed.
+  if (sourceId === 'workflow' || sourceId === 'instruct') {
     return null;
   }
 
@@ -115,6 +117,7 @@ export const invocationSources: InvocationSourceMeta[] = [
   { id: 'workflow', label: 'Workflow', available: true },
   { id: 'upscale', label: 'Upscale', available: true },
   { id: 'video', label: 'Video', available: true },
+  { id: 'instruct', label: 'Edit', available: true },
   { id: 'canvas', label: 'Canvas', available: true },
 ];
 
@@ -151,13 +154,16 @@ const validDestinationIds = new Set(resultDestinations.map((destination) => dest
 const sourceWidgetIds: Partial<Record<InvocationSourceId, WidgetId>> = {
   canvas: 'canvas',
   generate: 'generate',
+  instruct: 'instruct',
   upscale: 'upscale',
   video: 'video',
   workflow: 'workflow',
 };
 
 export interface InvocationRouteInput {
+  editTree: Project['editTree'];
   generateValues: Record<string, unknown>;
+  instructValues: Record<string, unknown>;
   upscaleValues: Record<string, unknown>;
   videoValues: Record<string, unknown>;
   workflowValues: Record<string, unknown>;
@@ -269,7 +275,9 @@ export const getInvocationRouteInput = (project: Project): InvocationRouteInput 
     canvasLayers,
     canvasRegionalLayersInFrame: getRegionalLayersInFrame(project.canvas.document, canvasLayers),
     canvasRasterInFrame: measuresRaster && hasRasterContentInFrame(project.canvas.document),
+    editTree: project.editTree,
     generateValues,
+    instructValues: getProjectWidgetValues(project, 'instruct'),
     upscaleValues: getProjectWidgetValues(project, 'upscale'),
     videoValues: getProjectWidgetValues(project, 'video'),
     workflowValues: getProjectWidgetValues(project, 'workflow'),
@@ -285,6 +293,8 @@ export const areInvocationRouteInputsEqual = (left: InvocationRouteInput, right:
   left.invocation === right.invocation &&
   left.projectGraph === right.projectGraph &&
   left.generateValues === right.generateValues &&
+  left.instructValues === right.instructValues &&
+  left.editTree === right.editTree &&
   left.upscaleValues === right.upscaleValues &&
   left.videoValues === right.videoValues &&
   left.workflowValues === right.workflowValues &&
@@ -394,6 +404,10 @@ export const resolveInvocationRouteInput = (
     );
   }
 
+  if (sourceId === 'instruct') {
+    validationReasons.push(...getEditRouteValidationReasons(input.instructValues, input.editTree, models));
+  }
+
   if (sourceId === 'canvas') {
     validationReasons.push(...getGenerateSnapshotValidationReasons(input.generateValues, models, input.canvasBbox));
 
@@ -423,8 +437,8 @@ export const resolveInvocationRouteInput = (
   }
 
   const sourceValid = validationReasons.length === 0;
-  // Canvas staging accepts images only; video routes must target Gallery or their outputs would be unreachable.
-  const destinationCompatible = !(sourceId === 'video' && destination === 'canvas');
+  // Canvas staging accepts images only, and an edit step's images belong to its tree: both target Gallery.
+  const destinationCompatible = !((sourceId === 'video' || sourceId === 'instruct') && destination === 'canvas');
   const destinationAvailable = isResultDestinationAvailable(destination);
   const destinationValid = destinationAvailable && destinationCompatible;
 
@@ -454,6 +468,7 @@ export const ROUTE_LABEL_KEYS: Record<InvocationSourceId | ResultDestination, st
   canvas: 'widgets.labels.canvas',
   gallery: 'widgets.labels.gallery',
   generate: 'widgets.labels.generate',
+  instruct: 'widgets.labels.instruct',
   upscale: 'widgets.labels.upscale',
   video: 'widgets.labels.video',
   workflow: 'widgets.labels.workflow',

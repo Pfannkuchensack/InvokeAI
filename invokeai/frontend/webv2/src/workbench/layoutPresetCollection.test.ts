@@ -15,7 +15,7 @@ const customPreset: LayoutPreset = {
 const account: AccountState = {
   activeLayoutPresetId: 'compose',
   customLayoutPresets: [customPreset],
-  layoutPresetOrder: ['custom-1', 'compose', 'edit', 'video', 'automate'],
+  layoutPresetOrder: ['custom-1', 'compose', 'edit', 'video', 'automate', 'instruct'],
 };
 
 describe('layout preset collection', () => {
@@ -25,6 +25,7 @@ describe('layout preset collection', () => {
       'edit',
       'video',
       'automate',
+      'instruct',
       'custom-1',
     ]);
   });
@@ -36,19 +37,20 @@ describe('layout preset collection', () => {
       'edit',
       'video',
       'automate',
+      'instruct',
     ]);
   });
 
   it('leaves a reordered strip reordered when it slots one in', () => {
     expect(
       normalizeLayoutPresetOrder(['custom-1', 'compose', 'edit', 'automate'], [...layoutPresets, customPreset])
-    ).toEqual(['custom-1', 'compose', 'edit', 'video', 'automate']);
+    ).toEqual(['custom-1', 'compose', 'edit', 'video', 'automate', 'instruct']);
   });
 
   it('still appends a custom preset the order has never seen', () => {
     expect(
       normalizeLayoutPresetOrder(['compose', 'edit', 'video', 'automate'], [...layoutPresets, customPreset])
-    ).toEqual(['compose', 'edit', 'video', 'automate', 'custom-1']);
+    ).toEqual(['compose', 'edit', 'video', 'automate', 'instruct', 'custom-1']);
   });
 
   it('resolves built-in and custom presets through the account order', () => {
@@ -58,6 +60,7 @@ describe('layout preset collection', () => {
       'edit',
       'video',
       'automate',
+      'instruct',
     ]);
   });
 
@@ -68,6 +71,7 @@ describe('layout preset collection', () => {
       'video',
       'automate',
       'compose',
+      'instruct',
     ]);
   });
 

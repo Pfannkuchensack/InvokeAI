@@ -45,6 +45,7 @@ export interface GalleryMediaUsage {
 /** In panel order; the labels are the Gallery's translations. */
 export type GalleryMediaUsageSurface =
   | 'generateReferenceImages'
+  | 'edit'
   | 'canvasRaster'
   | 'canvasControl'
   | 'canvasRegionalGuidance'

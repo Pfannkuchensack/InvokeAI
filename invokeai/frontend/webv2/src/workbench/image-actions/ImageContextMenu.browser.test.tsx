@@ -132,6 +132,7 @@ const createActions = (deleteItems: ImageActions['deleteItems']): ImageActions =
   moveImagesToBoard: vi.fn(() => Promise.resolve()),
   openItemInNewTab: vi.fn(),
   openItemInPreview: vi.fn(),
+  openImageInEdit: vi.fn(),
   openImageInPreview: vi.fn(),
   recallImageData: vi.fn(() => Promise.resolve()),
   loadVideoWorkflow: vi.fn(() => Promise.resolve()),
@@ -456,6 +457,26 @@ describe('ImageContextMenu canvas destinations', () => {
     expect(vi.mocked(actions.recallImageData).mock.calls.map(([entry, kind]) => [entry.imageName, kind])).toEqual([
       ['image-0.png', 'seed'],
     ]);
+  });
+
+  it('opens a single image in Edit, which a multi-image selection cannot', async () => {
+    const actions = createActions(vi.fn());
+    await renderMenu(actions, [image('image-0.png')]);
+
+    await pickItem('widgets.gallery.itemMenu.openInEdit');
+
+    expect(actions.openImageInEdit).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ imageName: 'image-0.png' })
+    );
+  });
+
+  it('offers no Open in Edit for several images', async () => {
+    await renderMenu(
+      createActions(vi.fn()),
+      Array.from({ length: 2 }, (_, index) => image(`image-${index}.png`))
+    );
+
+    expect(menuItemLabels()).not.toContain('widgets.gallery.itemMenu.openInEdit');
   });
 
   it('opens the multi-image menu, below its header, with the two canvas destinations in a group of their own', async () => {

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { getWidgetTypeIdForSourceId } from './graphWidgets';
 import { getLayoutPresetLabel, layoutPresets } from './layoutPresets';
 
 describe('built-in layout preset descriptors', () => {
@@ -21,7 +22,16 @@ describe('built-in layout preset descriptors', () => {
       't:topbar.presets.builtInLabels.edit',
       't:topbar.presets.builtInLabels.video',
       't:topbar.presets.builtInLabels.automate',
+      't:topbar.presets.builtInLabels.instruct',
     ]);
     expect(getLayoutPresetLabel({ label: 'My layout' }, t)).toBe('My layout');
+  });
+
+  it('places the widget of its default route in every preset', () => {
+    for (const preset of layoutPresets) {
+      const placed = Object.values(preset.snapshot.widgetInstances).map((instance) => instance.typeId);
+
+      expect(placed, preset.id).toContain(getWidgetTypeIdForSourceId(preset.defaultRoute.sourceId));
+    }
   });
 });
