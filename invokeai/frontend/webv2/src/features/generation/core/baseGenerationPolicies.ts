@@ -2144,14 +2144,24 @@ const getReferenceImageLimit = (model: GenerateModelConfig | undefined): number 
 };
 
 /**
- * What an instruction-edit model needs from the Edit pipeline, or null for a model that does not edit: the base declares
- * `instruction_edit` and, where it names a variant, the model is that variant. The source image is reference #1, so
- * `maxReferenceImages` counts it.
+ * The bases `compileEditGraph` has a family for. The backend facet says a base edits; this list says webv2 can run it,
+ * so a base the backend declares first is offered only once its family is added here and in the table.
+ */
+export const EDIT_BASES = ['flux2', 'flux3', 'qwen-image-2-1'] as const;
+
+export type EditBase = (typeof EDIT_BASES)[number];
+
+export const isEditBase = (base: string): base is EditBase => (EDIT_BASES as readonly string[]).includes(base);
+
+/**
+ * What an instruction-edit model needs from the Edit pipeline, or null for a model that does not edit: the base is in
+ * `EDIT_BASES`, declares `instruction_edit` and, where it names a variant, the model is that variant. The source image is
+ * reference #1, so `maxReferenceImages` counts it.
  */
 export const getInstructionEditSupport = (
   model: GenerateModelConfig | undefined
 ): { img2imgStart: boolean; maxReferenceImages: number } | null => {
-  if (!model || model.type === 'external_image_generator') {
+  if (!model || model.type === 'external_image_generator' || !isEditBase(model.base)) {
     return null;
   }
 

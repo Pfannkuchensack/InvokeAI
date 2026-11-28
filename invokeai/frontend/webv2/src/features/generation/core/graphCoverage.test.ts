@@ -10,6 +10,7 @@ import {
   addReferenceImages,
   getComponentSectionPolicy,
   getGenerationValidationReasons,
+  isEditBase,
   isLoraSupported,
   SUPPORTED_GENERATE_BASES,
 } from './baseGenerationPolicies';
@@ -212,10 +213,10 @@ const krea2EditCase = () => {
   };
 };
 
-/** The instruction-edit graph for every FLUX.2 model shape, with the source and one further reference. */
+/** The instruction-edit graph for every model shape of an edit base, with the source and one further reference. */
 const editCases = () =>
   generateGraphCases
-    .filter(({ base }) => base === 'flux2')
+    .filter(({ base }) => isEditBase(base))
     .map(({ base, shape }) => {
       const { filled, model, settings } = satisfiedSettingsFor(base, { ...shape, label: `edit-${shape.label}` });
 

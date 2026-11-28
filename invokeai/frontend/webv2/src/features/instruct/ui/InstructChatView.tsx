@@ -20,6 +20,7 @@ import {
   type InstructStepView,
 } from '@features/instruct/core/history';
 import { getReferenceNumber } from '@features/instruct/core/references';
+import { resolveEditOutputSize } from '@features/instruct/core/size';
 import { getInstructValidationReasons } from '@features/instruct/core/values';
 import { useInstructActions, useInstructUi } from '@features/instruct/ui/InstructUiContext';
 import { useRegisterDraftFlusher } from '@platform/react/draftRegistry';
@@ -645,12 +646,23 @@ const Composer = ({ tree }: { tree: InstructTreeView }) => {
 
   useRegisterDraftFlusher(commit);
 
+  const root = tree.nodes.find((node) => node.id === tree.rootNodeId);
+  // The size the step will take, which the graph is checked at.
+  const outputSize =
+    values.model && root
+      ? resolveEditOutputSize({
+          manual: values.sizeMode === 'manual' ? { height: values.height, width: values.width } : null,
+          model: values.model,
+          parent: { height: tip.height, isSource: tip.id === root.id, width: tip.width },
+          source: { height: root.height, width: root.width },
+        })
+      : undefined;
   const unavailableReference = values.references.findIndex((reference) => ui.missingImages.has(reference.image_name));
   const reasons = [
     ...(unavailableReference >= 0
       ? [t('widgets.instruct.referenceUnavailable', { number: getReferenceNumber(unavailableReference) })]
       : []),
-    ...getInstructValidationReasons({ ...values, instruction: text }, undefined),
+    ...getInstructValidationReasons({ ...values, instruction: text }, undefined, outputSize),
   ];
   const canSend = !isLocked && !isTipUnavailable && reasons.length === 0;
   const send = () => {

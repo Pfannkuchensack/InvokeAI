@@ -36,19 +36,18 @@ interface SizeBasis {
 }
 
 /** `auto` where Edit would pick the recorded size from the image the next step continues from. */
-const getSizeMode = async (
+const getSizeMode = (
   values: GenerateWidgetValues,
   model: MainModelConfig,
   basis: SizeBasis | null
-): Promise<InstructWidgetValues['sizeMode']> => {
+): InstructWidgetValues['sizeMode'] => {
   if (!basis) {
     return 'manual';
   }
 
-  const { fitToOptimalArea } = await import('@features/generation/editGraph');
   const auto = resolveEditOutputSize({
-    fit: (size) => fitToOptimalArea(size, model),
     manual: null,
+    model,
     parent: { height: basis.height, isSource: basis.isRoot, width: basis.width },
     source: { height: basis.height, width: basis.width },
   });
@@ -103,7 +102,7 @@ const toEditValues = (
  */
 export type EditRecallOutcome = 'declined' | 'recalled' | 'stale';
 
-export const recallIntoEdit = async (target: EditEntryTarget, input: EditRecallInput): Promise<EditRecallOutcome> => {
+const recall = (target: EditEntryTarget, input: EditRecallInput): EditRecallOutcome => {
   const model = input.values.model;
 
   if (!isInstructEditModel(model)) {
@@ -128,10 +127,10 @@ export const recallIntoEdit = async (target: EditEntryTarget, input: EditRecallI
   const values = toEditValues(
     input,
     model,
-    await getSizeMode(input.values, model, sourceNode ? basisOf(sourceNode) : newRoot)
+    getSizeMode(input.values, model, sourceNode ? basisOf(sourceNode) : newRoot)
   );
 
-  // The awaits above gave the user time to leave the project; its Edit must not change then.
+  // The project was checked at the start of this recall; it must still be the active one before its Edit changes.
   if (!target.isActiveProject(target.projectId)) {
     return 'stale';
   }
@@ -149,7 +148,7 @@ export const recallIntoEdit = async (target: EditEntryTarget, input: EditRecallI
       image: input.source,
       projectId: target.projectId,
       values,
-      ...(tip ? { valuesIfKept: { ...values, sizeMode: await getSizeMode(input.values, model, basisOf(tip)) } } : {}),
+      ...(tip ? { valuesIfKept: { ...values, sizeMode: getSizeMode(input.values, model, basisOf(tip)) } } : {}),
     });
   } else {
     target.commands.widgets.patchValues('instruct', values, target.projectId);
@@ -159,3 +158,7 @@ export const recallIntoEdit = async (target: EditEntryTarget, input: EditRecallI
 
   return 'recalled';
 };
+
+/** The recall needs nothing asynchronous now; callers keep awaiting it as one of several recall routes. */
+export const recallIntoEdit = (target: EditEntryTarget, input: EditRecallInput): Promise<EditRecallOutcome> =>
+  Promise.resolve(recall(target, input));

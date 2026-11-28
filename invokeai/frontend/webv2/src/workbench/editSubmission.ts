@@ -101,19 +101,29 @@ export const getEditRouteValidationReasons = (
   models: readonly ModelConfig[] | undefined
 ): string[] => {
   const instruct = normalizeInstructValues(values);
-  const reasons = getInstructValidationReasons(
-    models ? syncInstructValuesWithModels(instruct, models) : instruct,
-    models
-  );
+  const shown = models ? syncInstructValuesWithModels(instruct, models) : instruct;
   const tree = getEditableEditTree(storedTree);
 
   if (!tree) {
+    const reasons = getInstructValidationReasons(shown, models);
+
     reasons.push(storedTree ? 'The edit history was written by a newer version.' : 'Start from an image first.');
 
     return reasons;
   }
 
   const tip = getInstructTip(toInstructTreeView(tree), instruct);
+  const root = getEditNode(tree, tree.rootNodeId)!;
+  // The size the step will take, which the graph is checked at.
+  const size = shown.model
+    ? resolveEditOutputSize({
+        manual: shown.sizeMode === 'manual' ? { height: shown.height, width: shown.width } : null,
+        model: shown.model,
+        parent: { height: tip.height, isSource: tip.id === root.id, width: tip.width },
+        source: { height: root.height, width: root.width },
+      })
+    : undefined;
+  const reasons = getInstructValidationReasons(shown, models, size);
 
   if (tip.status === 'pending') {
     reasons.push('The previous step is still running.');
@@ -170,11 +180,11 @@ export const prepareEditStep = async ({
     throw new Error('The image to continue from is not available.');
   }
 
-  const { compileEditGraph, fitToOptimalArea } = await import('@features/generation/editGraph');
+  const { compileEditGraph } = await import('@features/generation/editGraph');
   const model: MainModelConfig = values.model;
   const size = resolveEditOutputSize({
-    fit: (source) => fitToOptimalArea(source, model),
     manual: values.sizeMode === 'manual' ? { height: values.height, width: values.width } : null,
+    model,
     parent: { height: parent.height, isSource: parent.id === root.id, width: parent.width },
     source: { height: root.height, width: root.width },
   });

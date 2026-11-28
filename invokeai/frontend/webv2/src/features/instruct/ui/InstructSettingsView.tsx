@@ -22,14 +22,13 @@ import {
   SeedField,
   updateConcept,
 } from '@features/generation/components';
-import { fitToOptimalArea } from '@features/generation/editGraph';
 import {
   type ComponentSlotPolicy,
   getComponentPolicyContext,
   getComponentSectionPolicy,
   getComponentSlotIssue,
   getDefaultGenerateSettings,
-  getDimensionGrid,
+  getGenerationDimensions,
   getGenerationUiPolicy,
   getGuidanceBoundReason,
   getGuidanceInputMax,
@@ -38,6 +37,8 @@ import {
   isLoraCompatibleWithModel,
   isLoraModelConfig,
   isMainModelConfig,
+  getEditValidationIssues,
+  toEditMessage,
   isModelIdentifierConfig,
   isVaeModelConfig,
 } from '@features/generation/settings';
@@ -48,19 +49,16 @@ import {
   getReferenceRoom,
   removeInstructReference,
 } from '@features/instruct/core/references';
-import {
-  MAX_EDIT_DIMENSION,
-  MIN_EDIT_DIMENSION,
-  resolveEditOutputSize,
-  snapEditDimension,
-} from '@features/instruct/core/size';
+import { resolveEditOutputSize, snapEditDimension } from '@features/instruct/core/size';
 import {
   getInstructMaxReferenceImages,
+  getInstructReferenceTag,
+  PLACEHOLDER_SOURCE,
   isInstructEditModel,
   MAX_INSTRUCT_VARIANTS,
   selectInstructModel,
 } from '@features/instruct/core/values';
-import { useInstructUi } from '@features/instruct/ui/InstructUiContext';
+import { useInstructActions, useInstructUi } from '@features/instruct/ui/InstructUiContext';
 import {
   getModelBaseColorPalette,
   getModelBaseLabel,
@@ -74,9 +72,10 @@ import { Combobox } from '@platform/ui/Combobox';
 import { Field } from '@platform/ui/Field';
 import { ScrubberField } from '@platform/ui/ScrubberField';
 import { ImageOffIcon, XIcon } from 'lucide-react';
-import { useCallback, useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
+import { LiveNote } from './LiveNote';
 import { useEnsureInstructCatalog, useInstructValues } from './useInstructValues';
 
 const MAIN_MODEL_TYPES: readonly ModelTaxonomyType[] = ['main'];
@@ -94,23 +93,31 @@ const SectionIds = {
   render: 'instruct-render',
 } as const;
 
+const getTrimKey = (values: { model: { key: string } | null; references: readonly { image_name: string }[] }) =>
+  `${values.model?.key}:${values.references.map((reference) => reference.image_name).join()}`;
+
 const ModelSection = () => {
   const { t } = useTranslation();
   const { patchValues } = useInstructUi();
+  const { readValues } = useInstructActions();
   const values = useInstructValues();
   const models = useModelsSelector((snapshot) => snapshot.models);
+  // The extra images the last switch dropped because the new model takes fewer, as Generate says on a switch. It holds
+  // until the model or the references change again, which the key tells.
+  const [trimmed, setTrimmed] = useState<{ count: number; key: string } | null>(null);
   const select = useCallback(
     (candidate: GenerationModelCatalogItem | null) => {
       if (isInstructEditModel(candidate)) {
-        patchValues((current) => {
-          const next = selectInstructModel(current, candidate, models);
+        const current = readValues();
+        const next = selectInstructModel(current, candidate, models);
 
-          return { model: next.model, references: next.references, settings: next.settings };
-        });
+        setTrimmed({ count: current.references.length - next.references.length, key: getTrimKey(next) });
+        patchValues({ model: next.model, references: next.references, settings: next.settings });
       }
     },
-    [models, patchValues]
+    [models, patchValues, readValues]
   );
+  const dropped = trimmed && trimmed.key === getTrimKey(values) ? trimmed.count : 0;
 
   return (
     <GenerationSettingsSection label={t('widgets.instruct.model')} sectionId={SectionIds.model} defaultOpen>
@@ -129,6 +136,13 @@ const ModelSection = () => {
           onChange={select}
         />
       </Field>
+      <LiveNote>
+        {dropped > 0
+          ? t('widgets.generate.switchChanges.removed', {
+              labels: t('widgets.generate.switchSubjects.referenceImages', { count: dropped }),
+            })
+          : null}
+      </LiveNote>
     </GenerationSettingsSection>
   );
 };
@@ -284,8 +298,11 @@ const ComponentRow = ({
   settings,
   slot,
   model,
+  step,
 }: {
   model: NonNullable<ReturnType<typeof useInstructValues>['model']>;
+  /** What the step's graph check says of this slot, where the slot alone cannot (a missing vision tower). */
+  step?: string;
   onChange: (slot: ComponentSlotPolicy, candidate: GenerationModelCatalogItem | null) => void;
   settings: GenerateSettings;
   slot: ComponentSlotPolicy;
@@ -297,7 +314,8 @@ const ComponentRow = ({
     (candidate: GenerationModelCatalogItem) => slot.filter?.(candidate, context) ?? false,
     [context, slot]
   );
-  const error = getComponentSlotIssue(slot, context) ?? undefined;
+  const slotIssue = getComponentSlotIssue(slot, context);
+  const error = slotIssue ? toEditMessage(slotIssue) : step;
 
   return (
     <Field error={error} helpText={slot.helpText} label={slot.label} labelPlacement="inside">
@@ -319,14 +337,22 @@ const ComponentRow = ({
   );
 };
 
-/** The encoder and VAE slots Generate offers FLUX.2, for the fields the edit graph reads. */
+/** The encoder and VAE slots Generate offers the model, for the fields the edit graph reads. */
 const ComponentsSection = () => {
   const { t } = useTranslation();
   const { patchValues } = useInstructUi();
-  const { model, settings } = useInstructValues();
+  const { model, references, settings } = useInstructValues();
   const full = useMemo(
     () => (model && settings ? ({ ...getDefaultGenerateSettings(model), ...settings } as GenerateSettings) : null),
     [model, settings]
+  );
+  // The step's own check, so a slot shows what would stop Send.
+  const stepIssues = useMemo(
+    () =>
+      model && settings
+        ? getEditValidationIssues({ images: [PLACEHOLDER_SOURCE, ...references], model, settings })
+        : [],
+    [model, references, settings]
   );
   const commit = useCallback(
     (slot: ComponentSlotPolicy, candidate: GenerationModelCatalogItem | null) => {
@@ -358,7 +384,14 @@ const ComponentsSection = () => {
     <GenerationSettingsSection label={t('widgets.instruct.components')} sectionId={SectionIds.components}>
       <Stack gap="2.5">
         {slots.map((slot) => (
-          <ComponentRow key={slot.key} model={model} settings={full} slot={slot} onChange={commit} />
+          <ComponentRow
+            key={slot.key}
+            model={model}
+            settings={full}
+            slot={slot}
+            step={stepIssues.find((issue) => issue.target.field === slot.key)?.message}
+            onChange={commit}
+          />
         ))}
       </Stack>
     </GenerationSettingsSection>
@@ -370,9 +403,12 @@ const ReferenceChip = ({
   label,
   onRemove,
   removeLabel,
+  tag,
 }: {
   imageName: string;
   label: string;
+  /** What the model calls this image in an instruction, where that is not "Image N". */
+  tag?: string;
   onRemove?: () => void;
   removeLabel?: string;
 }) => {
@@ -403,6 +439,11 @@ const ReferenceChip = ({
       <Text flex="1" fontSize="sm" fontWeight="500" minW="0">
         {isMissing ? `${label} · ${t('widgets.instruct.unavailable')}` : label}
       </Text>
+      {tag ? (
+        <Text color="fg.muted" fontFamily="mono" fontSize="xs">
+          {tag}
+        </Text>
+      ) : null}
       {onRemove ? (
         <IconButton aria-label={removeLabel ?? ''} size="xs" tooltip={removeLabel} variant="ghost" onClick={onRemove}>
           <XIcon />
@@ -440,13 +481,18 @@ const ReferencesSection = () => {
     <GenerationSettingsSection label={t('widgets.instruct.references')} sectionId={SectionIds.references} defaultOpen>
       <Stack gap="2">
         {tip?.imageName ? (
-          <ReferenceChip imageName={tip.imageName} label={t('widgets.instruct.imageN', { number: 1 })} />
+          <ReferenceChip
+            imageName={tip.imageName}
+            label={t('widgets.instruct.imageN', { number: 1 })}
+            tag={getInstructReferenceTag(values.model, 1)}
+          />
         ) : null}
         {values.references.map((reference, index) => (
           <ReferenceChip
             key={reference.image_name}
             imageName={reference.image_name}
             label={t('widgets.instruct.imageN', { number: getReferenceNumber(index) })}
+            tag={getInstructReferenceTag(values.model, getReferenceNumber(index))}
             removeLabel={t('widgets.instruct.removeReference', { number: getReferenceNumber(index) })}
             onRemove={() =>
               patchValues((current) => ({
@@ -467,6 +513,11 @@ const ReferencesSection = () => {
         <Text color="fg.muted" fontSize="xs">
           {t('widgets.instruct.referencesHint', { count: max - 1 })}
         </Text>
+        {getInstructReferenceTag(values.model, 1) ? (
+          <Text color="fg.muted" fontSize="xs">
+            {t('widgets.instruct.referenceTagsHint')}
+          </Text>
+        ) : null}
       </Stack>
     </GenerationSettingsSection>
   );
@@ -478,17 +529,27 @@ const OutputSection = () => {
   const values = useInstructValues();
   const tip = tree ? getInstructTip(tree, values) : null;
   const root = tree?.nodes.find((node) => node.id === tree.rootNodeId);
-  const grid = (values.model ? getDimensionGrid(values.model.base, values.model.variant) : null) ?? 16;
+  const limits = getGenerationDimensions(values.model ?? undefined);
+  const grid = limits.grid;
   const auto =
     values.model && tip && root
       ? resolveEditOutputSize({
-          fit: (source) => fitToOptimalArea(source, values.model!),
           manual: null,
+          model: values.model,
           parent: { height: tip.height, isSource: tip.id === root.id, width: tip.width },
           source: { height: root.height, width: root.width },
         })
       : null;
   const isManual = values.sizeMode === 'manual';
+  // A manual size left from another model is shown as the grid of this one will make it.
+  const manual = values.model
+    ? resolveEditOutputSize({
+        manual: { height: values.height, width: values.width },
+        model: values.model,
+        parent: { height: values.height, isSource: false, width: values.width },
+        source: { height: values.height, width: values.width },
+      })
+    : { height: values.height, width: values.width };
   const startManual = (checked: boolean) =>
     patchValues(
       checked
@@ -507,24 +568,26 @@ const OutputSection = () => {
         {isManual ? (
           <>
             <ScrubberField
-              inputMax={MAX_EDIT_DIMENSION}
-              inputMin={MIN_EDIT_DIMENSION}
+              inputMax={limits.max}
+              inputMin={limits.min}
               label={t('widgets.generate.width')}
-              max={4096}
-              min={MIN_EDIT_DIMENSION}
+              max={limits.max}
+              min={limits.min}
               step={grid}
-              value={values.width}
-              onChange={(width) => Number.isFinite(width) && patchValues({ width: snapEditDimension(width, grid) })}
+              value={manual.width}
+              onChange={(width) => Number.isFinite(width) && patchValues({ width: snapEditDimension(width, limits) })}
             />
             <ScrubberField
-              inputMax={MAX_EDIT_DIMENSION}
-              inputMin={MIN_EDIT_DIMENSION}
+              inputMax={limits.max}
+              inputMin={limits.min}
               label={t('widgets.generate.height')}
-              max={4096}
-              min={MIN_EDIT_DIMENSION}
+              max={limits.max}
+              min={limits.min}
               step={grid}
-              value={values.height}
-              onChange={(height) => Number.isFinite(height) && patchValues({ height: snapEditDimension(height, grid) })}
+              value={manual.height}
+              onChange={(height) =>
+                Number.isFinite(height) && patchValues({ height: snapEditDimension(height, limits) })
+              }
             />
           </>
         ) : (

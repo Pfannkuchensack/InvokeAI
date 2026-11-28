@@ -1,51 +1,32 @@
-import type { GenerationProjectSettings } from '@features/generation/core/contracts';
-import type { FamilyPipelineSettings } from '@features/generation/core/familyGraph';
 import type {
-  CompiledGenerateGraph,
-  GenerateReferenceImage,
-  ImageWithDims,
-  MainModelConfig,
-} from '@features/generation/core/types';
+  BackendGraphContract,
+  BackendInvocationContract,
+  GenerationProjectSettings,
+} from '@features/generation/core/contracts';
+import type { FamilyPipelineInput } from '@features/generation/core/familyGraph';
+import type { CompiledGenerateGraph, ImageWithDims, MainModelConfig } from '@features/generation/core/types';
+
+import { type EditBase, getInstructionEditSupport } from '@features/generation/core/baseGenerationPolicies';
+import {
+  addFluxKontextImages,
+  addFlux3ReferenceImages,
+  addQwenImage21ReferenceImages,
+  buildFlux2Pipeline,
+  buildFlux3Pipeline,
+  buildQwenImage21Pipeline,
+  getFlux2PipelineMetadata,
+} from '@features/generation/core/graph';
+import { addEdge, addMetadata, addOutputPostprocessors, toGraphContract } from '@features/generation/core/graphBuilder';
 
 import {
-  createReferenceImageId,
-  getDefaultGenerateSettings,
-  getGenerationDimensions,
-  getGenerationValidationReasons,
-  getInstructionEditSupport,
-} from '@features/generation/core/baseGenerationPolicies';
-import { addFluxKontextImages, buildFlux2Pipeline, getFlux2PipelineMetadata } from '@features/generation/core/graph';
-import { addMetadata, addOutputPostprocessors, toGraphContract } from '@features/generation/core/graphBuilder';
-import { calculateNewSize } from '@features/generation/core/settings';
+  EDIT_FAMILY_INFO,
+  type EditGraphSettings,
+  getEditReferenceImages,
+  getEditValidationIssues,
+  pickEditSettings,
+} from './editContract';
 
-/** The settings an edit step reads; prompt and seed enter at submission through the graph's `positive_prompt` and `seed` nodes. */
-export type EditGraphSettings = FamilyPipelineSettings;
-
-/** Every field the edit graph reads; the record type fails to compile until a new pipeline setting is placed here. */
-const EDIT_SETTINGS = {
-  cfgRescaleMultiplier: true,
-  cfgScale: true,
-  clipEmbedModel: true,
-  clipSkip: true,
-  componentSourceModel: true,
-  loras: true,
-  mistralEncoderModel: true,
-  qwen35EncoderModel: true,
-  qwen3EncoderModel: true,
-  qwen3VLEncoderModel: true,
-  qwenVLEncoderModel: true,
-  scheduler: true,
-  steps: true,
-  t5EncoderModel: true,
-  vae: true,
-  vaePrecision: true,
-} as const satisfies Record<keyof EditGraphSettings, true>;
-
-/** Only what the edit graph reads, so a wider object (Generate's settings) never reaches the validator or the graph. */
-const pickEditSettings = (settings: EditGraphSettings): EditGraphSettings =>
-  Object.fromEntries(
-    Object.keys(EDIT_SETTINGS).map((key) => [key, settings[key as keyof EditGraphSettings]])
-  ) as unknown as EditGraphSettings;
+export { type EditGraphSettings } from './editContract';
 
 export interface EditGraphInput {
   model: MainModelConfig;
@@ -60,10 +41,119 @@ export interface EditGraphInput {
   randDevice?: string;
 }
 
+interface EditFamilyInput {
+  model: MainModelConfig;
+  settings: EditGraphSettings;
+  size: { width: number; height: number };
+  /** The source first, then the references, as the model reads them. */
+  images: readonly ImageWithDims[];
+  useCpuNoise: boolean;
+}
+
+/** A family's graph before its metadata record is added. */
+interface EditFamilyGraph {
+  graph: BackendGraphContract;
+  /** The decode node whose image is the result. */
+  output: BackendInvocationContract;
+  /** `output`, or an upstream node that passes the record on to it (Qwen-Image 2.1's denoise adds its own keys). */
+  metadataNode: BackendInvocationContract;
+  /** The family's keys of the metadata record. */
+  metadata: Record<string, unknown>;
+}
+
+interface EditFamily {
+  /** The family's text-to-image pipeline with the references added, started from noise. */
+  build: (input: EditFamilyInput) => EditFamilyGraph;
+}
+
+const toPipelineInput = ({ model, settings, size, useCpuNoise }: EditFamilyInput): FamilyPipelineInput => ({
+  denoiseSize: size,
+  denoisingStart: 0,
+  model,
+  multiDiffusion: null,
+  output: { id: 'canvas_output', isIntermediate: false },
+  settings,
+  useCpuNoise,
+  vaeTileSize: null,
+});
+
+/** An entry per base in `EDIT_BASES`; a base added there fails to compile until it has its family here. */
+const EDIT_FAMILIES: Record<EditBase, EditFamily> = {
+  flux2: {
+    build: (input) => {
+      const pipeline = buildFlux2Pipeline(toPipelineInput(input));
+
+      addFluxKontextImages(
+        pipeline.graph,
+        input.images.map((image) => image.image_name),
+        pipeline.denoise,
+        'flux2_reference_image'
+      );
+
+      return {
+        graph: pipeline.graph,
+        metadata: getFlux2PipelineMetadata(input.model, input.settings, pipeline),
+        metadataNode: pipeline.output,
+        output: pipeline.output,
+      };
+    },
+  },
+  flux3: {
+    build: (input) => {
+      const pipeline = buildFlux3Pipeline(toPipelineInput(input));
+      const { components, graph, output, vaeModel } = pipeline;
+
+      addFlux3ReferenceImages(
+        graph,
+        { ...pipeline, upsamplerModel: null },
+        input.images.map((image) => image.image_name)
+      );
+
+      return {
+        graph,
+        metadata: {
+          // FLUX.3 offers no scheduler: its denoise node always runs the reference Euler sampler.
+          scheduler: 'euler',
+          qwen3_vl_encoder: components.qwen3VlEncoderModel ?? undefined,
+          vae: vaeModel ?? undefined,
+        },
+        metadataNode: output,
+        output,
+      };
+    },
+  },
+  'qwen-image-2-1': {
+    build: (input) => {
+      const pipeline = buildQwenImage21Pipeline(toPipelineInput(input), {
+        visionTower: input.settings.qwen3VLVisionTowerModel,
+      });
+      const { components, conditionings, denoise, graph, modelLoader, output, vaeModel } = pipeline;
+
+      addQwenImage21ReferenceImages(
+        graph,
+        { conditionings, denoise, modelLoader },
+        input.images.map((image) => ({ image_name: image.image_name }))
+      );
+
+      return {
+        graph,
+        metadata: {
+          qwen3_vl_encoder: components.qwen3VlEncoderModel ?? undefined,
+          qwen3_vl_vision_tower: components.qwen3VlVisionTowerModel ?? undefined,
+          vae: vaeModel ?? undefined,
+        },
+        // The denoise adds its prefix-cache mode to the record, so metadata passes through it.
+        metadataNode: denoise,
+        output,
+      };
+    },
+  },
+};
+
 /**
- * The instruction-edit graph: the family's text-to-image pipeline with the source and references as Kontext
- * conditioning, started from noise. The variants of one step are submission batches over this single graph. Results are
- * saved images (never intermediates), which the edit tree refers to by name; the board is the queue item's.
+ * The instruction-edit graph: the family's text-to-image pipeline with the source and references as the family's
+ * reference conditioning, started from noise. The variants of one step are submission batches over this single graph.
+ * Results are saved images (never intermediates), which the edit tree refers to by name; the board is the queue item's.
  */
 export const compileEditGraph = ({
   model,
@@ -76,7 +166,7 @@ export const compileEditGraph = ({
 }: EditGraphInput): CompiledGenerateGraph => {
   const support = getInstructionEditSupport(model);
 
-  if (model.base !== 'flux2' || !support) {
+  if (!support) {
     throw new Error(`${model.name} cannot edit images from instructions.`);
   }
 
@@ -84,58 +174,44 @@ export const compileEditGraph = ({
     throw new Error(`${model.name} starts editing from the source latent, which Edit does not support yet.`);
   }
 
+  const family = EDIT_FAMILIES[model.base as EditBase];
+  const { mode } = EDIT_FAMILY_INFO[model.base as EditBase];
   const settings = pickEditSettings(given);
-  // What Generate would run: the same rules for the size, the references and the components the loader needs.
   const images = [source, ...referenceImages];
-  const refs: GenerateReferenceImage[] = images.map((image) => ({
-    config: { image: { original: { image } }, type: 'flux2_reference_image' },
-    id: createReferenceImageId(),
-    isEnabled: true,
-  }));
-  const [invalid] = getGenerationValidationReasons(model, {
-    ...getDefaultGenerateSettings(model),
-    ...settings,
-    ...size,
-    referenceImages: refs,
-  });
+  const [invalid] = getEditValidationIssues({ images, model, settings, size });
 
   if (invalid) {
-    throw new Error(invalid);
+    throw new Error(invalid.message);
   }
 
   const runtimeProjectSettings = { ...projectSettings, randDevice };
-  const pipeline = buildFlux2Pipeline({
-    denoiseSize: size,
-    denoisingStart: 0,
+  const { graph, metadata, metadataNode, output } = family.build({
+    images,
     model,
-    multiDiffusion: null,
-    output: { id: 'canvas_output', isIntermediate: false },
     settings,
+    size,
     useCpuNoise: projectSettings.useCpuNoise,
-    vaeTileSize: null,
   });
-  const { denoise, graph, output } = pipeline;
 
-  addFluxKontextImages(
-    graph,
-    images.map((image) => image.image_name),
-    denoise,
-    'flux2_reference_image'
-  );
   addMetadata(
     graph,
-    output,
+    metadataNode,
     { ...settings, ...size, seamlessXAxis: false, seamlessYAxis: false },
     model,
-    'flux2_edit',
+    mode,
     runtimeProjectSettings,
     {
-      ...getFlux2PipelineMetadata(model, settings, pipeline),
+      ...metadata,
       edit_source_image_name: source.image_name,
       // The source first, as the model reads it, so Generate recalls the run from these alone.
-      ref_images: refs,
+      ref_images: getEditReferenceImages(model.base as EditBase, images),
     }
   );
+
+  if (metadataNode !== output) {
+    addEdge(graph, metadataNode, 'metadata', output, 'metadata');
+  }
+
   addOutputPostprocessors(graph, runtimeProjectSettings, false);
 
   return {
@@ -147,15 +223,4 @@ export const compileEditGraph = ({
   };
 };
 
-/**
- * The size an edit result takes from a source image: its aspect ratio at the model's ideal area on the model's grid,
- * whether the source is larger or smaller.
- */
-export const fitToOptimalArea = (
-  source: { width: number; height: number },
-  model: Pick<MainModelConfig, 'base' | 'type' | 'variant'>
-): { width: number; height: number } => {
-  const { grid, optimal } = getGenerationDimensions(model);
-
-  return calculateNewSize(source.width / source.height, optimal * optimal, grid);
-};
+export { fitToOptimalArea } from './editContract';

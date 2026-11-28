@@ -560,7 +560,10 @@
       "max_reference_images": 10,
       "reference_images_require_variant": null,
       "reference_images_require_vision_tower": false,
-      "instruction_edit": null,
+      "instruction_edit": {
+        "requires_variant": null,
+        "img2img_start": false
+      },
       "supports_regional_guidance": true,
       "regional_negative": false,
       "clip_skip_max": null,
@@ -610,7 +613,10 @@
       "max_reference_images": 10,
       "reference_images_require_variant": null,
       "reference_images_require_vision_tower": false,
-      "instruction_edit": null,
+      "instruction_edit": {
+        "requires_variant": null,
+        "img2img_start": false
+      },
       "supports_regional_guidance": true,
       "regional_negative": false,
       "clip_skip_max": null,
@@ -1057,7 +1063,10 @@
       "max_reference_images": 4,
       "reference_images_require_variant": null,
       "reference_images_require_vision_tower": true,
-      "instruction_edit": null,
+      "instruction_edit": {
+        "requires_variant": null,
+        "img2img_start": false
+      },
       "supports_regional_guidance": false,
       "regional_negative": false,
       "clip_skip_max": null,
@@ -1100,7 +1109,10 @@
       "max_reference_images": 4,
       "reference_images_require_variant": null,
       "reference_images_require_vision_tower": true,
-      "instruction_edit": null,
+      "instruction_edit": {
+        "requires_variant": null,
+        "img2img_start": false
+      },
       "supports_regional_guidance": false,
       "regional_negative": false,
       "clip_skip_max": null,

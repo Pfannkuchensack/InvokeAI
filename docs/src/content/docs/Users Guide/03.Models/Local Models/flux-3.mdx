@@ -140,6 +140,8 @@ FLUX.3 names its references in the prompt as `<ref_image_0>`, `<ref_image_1>` an
 the tag to copy it. Only enabled references with an image are numbered, so turning one off renumbers the ones below
 it. A reference's name is only a label: the tag follows its position.
 
+The Edit preset runs both FLUX.3 variants as instruction editors: the image you edit is reference image 1 and you can add up to nine more. The preset numbers images from 1, but FLUX.3 reads `<ref_image_0>` for image 1, `<ref_image_1>` for image 2 and so on, so write those tags in the instruction; each image in the preset shows its tag. The preset does not run the prompt upsampler. Results record `flux3_edit` as their generation mode.
+
 In the workflow editor, wrap each image in a **Kontext Conditioning - FLUX** node and connect them, or a collection
 of them, to the **Reference Images** input of **Denoise - FLUX.3**.
 

@@ -2,7 +2,17 @@ import type { EditGraphSettings } from '@features/generation/editGraph';
 import type { ModelConfig } from '@features/models';
 
 import { addConcept } from '@features/generation/components';
+import { compileEditGraph } from '@features/generation/core/edit/compileEditGraph';
 import { satisfiedSettingsFor } from '@features/generation/core/graphCoverage.testing';
+import {
+  EDIT_BASES,
+  fitToOptimalArea,
+  getDefaultGenerateSettings,
+  getEditValidationIssues,
+  getGenerationDimensions,
+  toEditMessage,
+  getInstructionEditSupport,
+} from '@features/generation/settings';
 import architectureCapabilitiesFixture from '@features/models/core/__fixtures__/architectureCapabilities.json';
 import { setArchitectureCapabilities } from '@features/models/core/architectureCapabilities';
 import { seedArchitectureCapabilities } from '@features/models/core/architectureCapabilities.testing';
@@ -16,26 +26,38 @@ import { resolveEditOutputSize } from './size';
 import {
   createDefaultInstructValues,
   getInstructStepSettings,
+  getInstructReferenceTag,
   getInstructValidationReasons,
+  INSTRUCT_PIPELINE_KEYS,
   isInstructEditModel,
   normalizeInstructValues,
   resolveInstructPatch,
+  selectInstructModel,
   syncInstructValuesWithModels,
 } from './values';
 
 seedArchitectureCapabilities();
 
-const fit = ({ height, width }: { width: number; height: number }) => ({ height: height * 2, width: width * 2 });
+const GGUF_SHAPE = { ggufEncoder: true, label: 'gguf', overrides: { format: 'gguf_quantized' } } as const;
+
 const image = (name: string) => ({ height: 100, image_name: name, width: 100 });
 
+const modelOf = (base: 'flux2' | 'flux3' | 'qwen-image-2-1') =>
+  satisfiedSettingsFor(base, {
+    label: 'm',
+    overrides: base === 'flux2' ? { format: 'diffusers', variant: 'dev' } : { format: 'diffusers' },
+  }).model;
+
 describe('output size', () => {
-  const base = { fit, manual: null, source: { height: 300, width: 200 } };
+  const limits = getGenerationDimensions(modelOf('qwen-image-2-1'));
+  const flux2 = modelOf('flux2');
+  const qwen = modelOf('qwen-image-2-1');
+  const base = { manual: null, model: flux2, source: { height: 300, width: 200 } };
 
   it('fits the source for the first step and inherits the parent size after it, so a chain never drifts', () => {
-    expect(resolveEditOutputSize({ ...base, parent: { height: 300, isSource: true, width: 200 } })).toEqual({
-      height: 600,
-      width: 400,
-    });
+    expect(resolveEditOutputSize({ ...base, parent: { height: 300, isSource: true, width: 200 } })).toEqual(
+      fitToOptimalArea({ height: 300, width: 200 }, flux2)
+    );
     expect(resolveEditOutputSize({ ...base, parent: { height: 832, isSource: false, width: 1216 } })).toEqual({
       height: 832,
       width: 1216,
@@ -50,6 +72,25 @@ describe('output size', () => {
         parent: { height: 1, isSource: false, width: 1 },
       })
     ).toEqual({ height: 512, width: 768 });
+  });
+
+  it('snaps an inherited size to the grid of a model switched to: 1184x880 is 1184x896 on the 32 grid', () => {
+    expect(
+      resolveEditOutputSize({ ...base, model: qwen, parent: { height: 880, isSource: false, width: 1184 } })
+    ).toEqual({ height: 896, width: 1184 });
+  });
+
+  it('snaps a manual size to the nearest multiple, halves rounding up, within the limits: 1008 is 1024', () => {
+    const manual = (width: number, height: number) =>
+      resolveEditOutputSize({
+        ...base,
+        manual: { height, width },
+        model: qwen,
+        parent: { height: 1, isSource: false, width: 1 },
+      });
+
+    expect(manual(1008, 1008)).toEqual({ height: 1024, width: 1024 });
+    expect(manual(1, 100000)).toEqual({ height: limits.max, width: limits.min });
   });
 });
 
@@ -85,16 +126,33 @@ describe('Edit values', () => {
 
     expect(isInstructEditModel(model)).toBe(true);
     expect(values.variants).toBe(4);
-    expect(Object.keys(snapshot).sort()).toEqual([
-      'cfgScale',
-      'loras',
-      'mistralEncoderModel',
-      'model',
-      'scheduler',
-      'steps',
-      'vae',
-    ]);
+    // Every pipeline field the step reads and the model holds, as an identifier where it is a model.
+    expect(Object.keys(snapshot).sort()).toEqual(
+      [...INSTRUCT_PIPELINE_KEYS, 'model']
+        .filter(
+          (key) =>
+            key === 'model' ||
+            ((values.settings as never)[key] !== null && (values.settings as never)[key] !== undefined)
+        )
+        .sort()
+    );
+    // Models are kept by identifier, not as the full config.
+    expect(JSON.stringify(snapshot)).not.toContain('"format"');
     expect(JSON.stringify(snapshot).length).toBeLessThan(1500);
+  });
+
+  it('reads Qwen-Image 2.1 as an edit model and holds the vision tower it reads', () => {
+    const qwen = satisfiedSettingsFor('qwen-image-2-1', { label: 'diffusers', overrides: { format: 'diffusers' } });
+    expect(isInstructEditModel(qwen.model)).toBe(true);
+    const gguf = satisfiedSettingsFor('qwen-image-2-1', GGUF_SHAPE);
+
+    expect(gguf.settings.qwen3VLVisionTowerModel).toBeTruthy();
+    expect(normalizeInstructValues({ model: gguf.model, settings: gguf.settings }).settings).toMatchObject({
+      qwen3VLVisionTowerModel: { key: gguf.settings.qwen3VLVisionTowerModel!.key },
+    });
+    expect(normalizeInstructValues({ model: qwen.model, settings: qwen.settings }).settings).toMatchObject({
+      qwen3VLVisionTowerModel: null,
+    });
   });
 
   it('starts without a model when none is installed', () => {
@@ -259,5 +317,168 @@ describe('what keeps a step from being queued', () => {
     const shown = syncInstructValuesWithModels(normalizeInstructValues({}), [withDefaults, encoder as ModelConfig]);
 
     expect(shown.settings?.qwen3EncoderModel?.key).toBe(encoder.key);
+  });
+});
+
+describe('what Send allows is what compiles', () => {
+  const PROJECT = { useCpuNoise: true, useNsfwChecker: false, useWatermark: false };
+  const SOURCE = { height: 512, image_name: 'source.png', width: 512 };
+
+  /** The reasons before Send for these values, and the message compile refuses with (both worded as Edit). */
+  const both = (
+    base: 'flux3' | 'qwen-image-2-1',
+    overrides: Record<string, unknown>,
+    patch: Record<string, unknown>,
+    size = { height: 1024, width: 1024 }
+  ) => {
+    const { model, settings } = satisfiedSettingsFor(base, {
+      ...(overrides.format === 'gguf_quantized' ? { ggufEncoder: true } : {}),
+      label: 'm',
+      overrides,
+    } as never);
+    const picked = { ...settings, ...patch } as EditGraphSettings;
+    const reasons = getInstructValidationReasons(
+      { ...createDefaultInstructValues([model]), instruction: 'brighter', settings: picked },
+      undefined,
+      size
+    );
+    let refusal = '';
+
+    try {
+      compileEditGraph({
+        model,
+        projectSettings: PROJECT,
+        referenceImages: [],
+        settings: picked,
+        size,
+        source: SOURCE,
+      });
+    } catch (error) {
+      refusal = (error as Error).message.replace(/^Generate /, 'Edit ');
+    }
+
+    return { reasons, refusal };
+  };
+
+  it('refuses a GGUF encoder without its Vision Tower for Qwen-Image 2.1, in the same words', () => {
+    const base = 'qwen-image-2-1';
+    const { reasons, refusal } = both(base, { format: 'gguf_quantized' }, { qwen3VLVisionTowerModel: null });
+
+    expect(refusal).toMatch(/Vision Tower/);
+    expect(reasons).toContain(refusal);
+    expect(both(base, { format: 'gguf_quantized' }, {}).reasons).toEqual([]);
+  });
+
+  it('refuses FLUX.3 Klein with CFG above 1, as after switching from Klein Base, in the same words', () => {
+    const { reasons, refusal } = both('flux3', { format: 'diffusers', variant: 'flux3_klein' }, { cfgScale: 3.5 });
+
+    expect(refusal).toMatch(/Klein samples without CFG/);
+    expect(reasons).toContain(refusal);
+  });
+
+  it('refuses a size off the model grid in the same words', () => {
+    const { reasons, refusal } = both('qwen-image-2-1', { format: 'diffusers' }, {}, { height: 1024, width: 1040 });
+
+    expect(refusal).toMatch(/multiple of 32/);
+    expect(reasons).toContain(refusal);
+  });
+
+  it('points the Vision Tower issue at its Components slot', () => {
+    const { model, settings } = satisfiedSettingsFor('qwen-image-2-1', GGUF_SHAPE);
+    const issues = getEditValidationIssues({
+      images: [SOURCE],
+      model,
+      settings: { ...settings, qwen3VLVisionTowerModel: null } as EditGraphSettings,
+    });
+
+    expect(issues.map((issue) => issue.target.field)).toContain('qwen3VLVisionTowerModel');
+  });
+});
+
+describe('edit bases', () => {
+  const shapes = {
+    flux2: { label: 'dev', overrides: { format: 'diffusers', variant: 'dev' } },
+    flux3: { label: 'klein', overrides: { format: 'diffusers', variant: 'flux3_klein' } },
+  } as const;
+  const modelFor = (base: 'flux2' | 'flux3' | 'krea-2' | 'qwen-image-2-1' | 'sdxl' | 'flux' | 'z-image') =>
+    satisfiedSettingsFor(
+      base,
+      (shapes as unknown as Record<string, never>)[base] ?? { label: 'd', overrides: { format: 'diffusers' } }
+    ).model;
+
+  it('are exactly the models the picker accepts', () => {
+    const accepted = (['flux2', 'flux3', 'krea-2', 'qwen-image-2-1', 'sdxl', 'flux', 'z-image'] as const).filter(
+      (base) => isInstructEditModel(modelFor(base))
+    );
+
+    expect([...accepted].sort()).toEqual([...EDIT_BASES].sort());
+  });
+
+  it('describe FLUX.3 as editing from noise with up to ten images', () => {
+    expect(getInstructionEditSupport(modelFor('flux3'))).toEqual({
+      img2imgStart: false,
+      maxReferenceImages: 10,
+    });
+  });
+
+  it('name FLUX.3 images by tag, one number below the one Edit shows, and no other model', () => {
+    expect([1, 2, 10].map((number) => getInstructReferenceTag(modelFor('flux3'), number))).toEqual([
+      '<ref_image_0>',
+      '<ref_image_1>',
+      '<ref_image_9>',
+    ]);
+    expect(getInstructReferenceTag(modelFor('flux2'), 1)).toBeUndefined();
+    expect(getInstructReferenceTag(null, 1)).toBeUndefined();
+  });
+});
+
+describe('switching the Edit model', () => {
+  const models = (...picked: ReturnType<typeof modelOf>[]) => picked as unknown as ModelConfig[];
+
+  it('gives a value still at the previous default the new default, and keeps one the user changed', () => {
+    const klein = satisfiedSettingsFor('flux3', {
+      label: 'klein',
+      overrides: { format: 'diffusers', variant: 'flux3_klein' },
+    });
+    const target = satisfiedSettingsFor('qwen-image-2-1', { label: 'd', overrides: { format: 'diffusers' } });
+    const kleinDefaults = getDefaultGenerateSettings(klein.model);
+    const targetDefaults = getDefaultGenerateSettings(target.model);
+    const untouched = normalizeInstructValues({
+      model: klein.model,
+      settings: {
+        ...klein.settings,
+        cfgScale: kleinDefaults.cfgScale,
+        scheduler: kleinDefaults.scheduler,
+        steps: kleinDefaults.steps,
+      },
+    });
+    const changed = normalizeInstructValues({ model: klein.model, settings: { ...klein.settings, steps: 23 } });
+
+    expect(kleinDefaults.steps).not.toBe(targetDefaults.steps);
+    expect(selectInstructModel(untouched, target.model, models(target.model)).settings).toMatchObject({
+      cfgScale: targetDefaults.cfgScale,
+      scheduler: targetDefaults.scheduler,
+      steps: targetDefaults.steps,
+    });
+    expect(selectInstructModel(changed, target.model, models(target.model)).settings?.steps).toBe(23);
+  });
+});
+
+describe('Edit wording of a refusal', () => {
+  it('counts the image being edited in a reference limit and names Edit for a missing component', () => {
+    const { model, settings } = satisfiedSettingsFor('qwen-image-2-1', {
+      label: 'd',
+      overrides: { format: 'diffusers' },
+    });
+    const issues = getEditValidationIssues({
+      images: Array.from({ length: 5 }, (_, index) => image(`${index}.png`)),
+      model,
+      settings: settings as EditGraphSettings,
+    });
+
+    expect(issues.map(({ message }) => message)).toEqual([
+      expect.stringMatching(/takes at most 4 reference images, the image you edit counted as one\. Remove the extra/),
+    ]);
+    expect(toEditMessage('Generate needs a VAE for FLUX models.')).toBe('Edit needs a VAE for FLUX models.');
   });
 });

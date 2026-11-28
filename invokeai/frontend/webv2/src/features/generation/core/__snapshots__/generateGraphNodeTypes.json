@@ -188,7 +188,13 @@
           "qwen3VLEncoderModel",
           "vae"
         ],
-        "klein-base-diffusers": []
+        "klein-base-diffusers": [],
+        "edit-klein-diffusers": [],
+        "edit-klein-standalone": [
+          "qwen3VLEncoderModel",
+          "vae"
+        ],
+        "edit-klein-base-diffusers": []
       },
       "nodeTypes": [
         "collect",
@@ -358,6 +364,15 @@
           "vae"
         ],
         "standalone-gguf-encoder": [
+          "qwen3VLEncoderModel",
+          "vae"
+        ],
+        "edit-diffusers": [],
+        "edit-standalone-components": [
+          "qwen3VLEncoderModel",
+          "vae"
+        ],
+        "edit-standalone-gguf-encoder": [
           "qwen3VLEncoderModel",
           "vae"
         ]
@@ -795,10 +810,12 @@
           "flux_txt2img",
           "flux2_edit",
           "flux2_txt2img",
+          "flux3_edit",
           "flux3_txt2img",
           "ideogram4_txt2img",
           "krea2_txt2img",
           "moss_image_txt2img",
+          "qwen_image_2_1_edit",
           "qwen_image_2_1_txt2img",
           "qwen_image_txt2img",
           "sd3_txt2img",

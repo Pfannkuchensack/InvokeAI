@@ -1,11 +1,14 @@
-import type { GenerateSettings, ImageWithDims, MainModelConfig } from '@features/generation/contracts';
+import type { GenerateLora, ImageWithDims, MainModelConfig } from '@features/generation/contracts';
 import type { EditGraphSettings } from '@features/generation/editGraph';
 
 import {
-  getComponentValidationIssues,
+  EDIT_FAMILY_INFO,
+  EDIT_SETTINGS,
+  getEditValidationIssues,
   getDefaultGenerateSettings,
   getGenerateModelSelectionResult,
   getInstructionEditSupport,
+  isEditBase,
   isMainModelConfig,
   normalizeGenerateSettings,
 } from '@features/generation/settings';
@@ -15,9 +18,9 @@ import type { InstructModelCatalogItem, InstructWidgetValues } from './types';
 
 import { addInstructReferences } from './references';
 
-/** A model Edit can run: it edits from instructions and starts from noise (see `compileEditGraph`). */
+/** A model Edit can run: its base has an edit family, and it edits from instructions starting from noise. */
 export const isInstructEditModel = (model: InstructModelCatalogItem | null | undefined): model is MainModelConfig => {
-  if (!isMainModelConfig(model) || model.base !== 'flux2') {
+  if (!isMainModelConfig(model)) {
     return false;
   }
 
@@ -26,30 +29,18 @@ export const isInstructEditModel = (model: InstructModelCatalogItem | null | und
   return support !== null && !support.img2imgStart;
 };
 
+/**
+ * What a model that names its references by a tag is told in an instruction, for Edit's one-based "Image N":
+ * FLUX.3 reads `<ref_image_0>`, `<ref_image_1>`, ... in the order the references are connected. Null for the others,
+ * which read the instruction as written.
+ */
+export const getInstructReferenceTag = (model: MainModelConfig | null, imageNumber: number): string | undefined =>
+  model && isEditBase(model.base) ? EDIT_FAMILY_INFO[model.base].referenceTag?.(imageNumber) : undefined;
+
 export const getInstructMaxReferenceImages = (model: MainModelConfig | null): number =>
   (model && getInstructionEditSupport(model)?.maxReferenceImages) || 1;
 
-/** Every field the edit graph reads, so a key the pipeline gains cannot go unsaved. */
-const PIPELINE_KEYS = {
-  cfgRescaleMultiplier: true,
-  cfgScale: true,
-  clipEmbedModel: true,
-  clipSkip: true,
-  componentSourceModel: true,
-  loras: true,
-  mistralEncoderModel: true,
-  qwen35EncoderModel: true,
-  qwen3EncoderModel: true,
-  qwen3VLEncoderModel: true,
-  qwenVLEncoderModel: true,
-  scheduler: true,
-  steps: true,
-  t5EncoderModel: true,
-  vae: true,
-  vaePrecision: true,
-} as const satisfies Record<keyof EditGraphSettings, true>;
-
-export const INSTRUCT_PIPELINE_KEYS = Object.keys(PIPELINE_KEYS) as (keyof EditGraphSettings)[];
+export const INSTRUCT_PIPELINE_KEYS = Object.keys(EDIT_SETTINGS) as (keyof EditGraphSettings)[];
 
 export const MAX_INSTRUCT_VARIANTS = 4;
 
@@ -129,7 +120,7 @@ export const selectInstructModel = (
   // The previous model's key makes this a switch, so the new model's default components fill empty slots as in Generate.
   const { settings } = getGenerateModelSelectionResult({
     currentValues: {
-      ...getDefaultGenerateSettings(values.model ?? model),
+      ...getDefaultGenerateSettings(model),
       ...values.settings,
       model,
       modelKey: values.model?.key,
@@ -138,6 +129,17 @@ export const selectInstructModel = (
     models,
   });
 
+  // A value still at the previous model's default is the new model's default; one the user changed carries over.
+  const previous = values.model ? getDefaultGenerateSettings(values.model) : null;
+  const fresh = getDefaultGenerateSettings(model);
+  const carried = pickPipeline(settings);
+
+  for (const key of ['cfgScale', 'scheduler', 'steps'] as const) {
+    if (previous && values.settings && Object.is(values.settings[key], previous[key])) {
+      (carried as unknown as Record<string, unknown>)[key] = fresh[key];
+    }
+  }
+
   return {
     ...values,
     model,
@@ -145,7 +147,7 @@ export const selectInstructModel = (
       maxReferenceImages: getInstructMaxReferenceImages(model),
       sourceImageName: null,
     }),
-    settings: pickPipeline(settings),
+    settings: carried,
   };
 };
 
@@ -203,9 +205,18 @@ export const resolveInstructPatch = (
     : result;
 };
 
+/** The image the shown source stands for before the tree's tip is known: validation reads only its count and kind. */
+export const PLACEHOLDER_SOURCE: ImageWithDims = { height: 1, image_name: 'source', width: 1 };
+
+/**
+ * Why a step cannot be queued. The graph checks come from the validator `compileEditGraph` runs, on the same inputs
+ * (the picked settings, the source and references as the family's reference images, the resolved `size`), so what
+ * this lets through compiles. Without `size` the model's default size is checked.
+ */
 export const getInstructValidationReasons = (
   values: InstructWidgetValues,
-  models: readonly InstructModelCatalogItem[] | undefined
+  models: readonly InstructModelCatalogItem[] | undefined,
+  size?: { width: number; height: number }
 ): string[] => {
   const reasons: string[] = [];
   const installed = values.model ? models?.find((candidate) => candidate.key === values.model?.key) : values.model;
@@ -216,15 +227,16 @@ export const getInstructValidationReasons = (
     reasons.push(`${values.model.name} is not installed.`);
   }
 
-  if (values.model && values.settings) {
-    // The components the edit graph compile refuses without, worded for this surface.
-    const settings = { ...getDefaultGenerateSettings(values.model), ...values.settings } as GenerateSettings;
+  if (values.model && values.settings && isInstructEditModel(values.model)) {
+    // Worded for this surface; one message per problem, as the Components section and Generate's panel show them.
+    const messages = getEditValidationIssues({
+      images: [PLACEHOLDER_SOURCE, ...values.references],
+      model: values.model,
+      settings: { ...getDefaultGenerateSettings(values.model), ...values.settings } as EditGraphSettings,
+      size,
+    }).map(({ message }) => message);
 
-    reasons.push(
-      ...getComponentValidationIssues(values.model, settings).map(({ message }) =>
-        message.replace(/^Generate /, 'Edit ')
-      )
-    );
+    reasons.push(...new Set(messages));
   }
 
   if (values.instruction.trim().length === 0) {
@@ -243,16 +255,18 @@ const toIdentifier = (value: unknown): unknown =>
  */
 export const getInstructStepSettings = (values: InstructWidgetValues): Record<string, unknown> => {
   const settings = values.settings;
+  const kept: Record<string, unknown> = { model: toIdentifier(values.model) };
 
-  return JSON.parse(
-    JSON.stringify({
-      cfgScale: settings?.cfgScale,
-      loras: settings?.loras.map((lora) => ({ ...lora, model: toIdentifier(lora.model) })),
-      mistralEncoderModel: toIdentifier(settings?.mistralEncoderModel),
-      model: toIdentifier(values.model),
-      scheduler: settings?.scheduler,
-      steps: settings?.steps,
-      vae: toIdentifier(settings?.vae),
-    })
-  ) as Record<string, unknown>;
+  for (const key of INSTRUCT_PIPELINE_KEYS) {
+    const value = settings?.[key];
+
+    if (value !== null && value !== undefined) {
+      kept[key] =
+        key === 'loras'
+          ? (value as GenerateLora[]).map((lora) => ({ ...lora, model: toIdentifier(lora.model) }))
+          : toIdentifier(value);
+    }
+  }
+
+  return JSON.parse(JSON.stringify(kept)) as Record<string, unknown>;
 };

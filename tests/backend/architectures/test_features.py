@@ -119,14 +119,18 @@ def test_reference_images_and_the_conditions_on_them() -> None:
     assert anima is not None and anima.max_reference_images == 4
 
 
-def test_only_flux2_declares_instruction_edit() -> None:
+def test_instruction_edit_is_declared_by_exactly_these_bases() -> None:
     """Instruction edit is what the Edit workspace offers; accepting reference images is not enough."""
     declared = {
         b.value: f.instruction_edit
         for b in generative_bases()
         if (f := get(b, FeaturesFacet)) is not None and f.instruction_edit is not None
     }
-    assert declared == {"flux2": InstructionEditFacet(requires_variant=None, img2img_start=False)}
+    assert declared == {
+        "flux2": InstructionEditFacet(requires_variant=None, img2img_start=False),
+        "flux3": InstructionEditFacet(requires_variant=None, img2img_start=False),
+        "qwen-image-2-1": InstructionEditFacet(requires_variant=None, img2img_start=False),
+    }
 
 
 def test_instruction_edit_is_declared_exactly_where_the_edit_mode_is() -> None:

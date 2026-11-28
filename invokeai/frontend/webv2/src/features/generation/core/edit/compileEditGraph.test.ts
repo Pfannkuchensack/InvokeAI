@@ -170,6 +170,165 @@ describe('compileEditGraph', () => {
   });
 });
 
+const QWEN21_GGUF: ModelShape = { ggufEncoder: true, label: 'gguf', overrides: { format: 'gguf_quantized' } };
+const DIFFUSERS: ModelShape = { label: 'diffusers', overrides: { format: 'diffusers' } };
+type GraphNode = BackendGraphContract['nodes'][string];
+
+const compileBase = (
+  base: 'flux3' | 'qwen-image-2-1',
+  shape: ModelShape,
+  referenceImages: ImageWithDims[] = [],
+  patch: Record<string, unknown> = {}
+) => {
+  const { model, settings } = satisfiedSettingsFor(base, shape);
+
+  return compileEditGraph({
+    model,
+    projectSettings: PROJECT,
+    referenceImages,
+    settings: { ...settings, ...patch },
+    size: { height: 1024, width: 1024 },
+    source: { height: 512, image_name: 'source.png', width: 512 },
+  }).backendGraph;
+};
+
+const edgeInto = (graph: BackendGraphContract, nodeId: string, field: string) =>
+  graph.edges.find((edge) => edge.destination.node_id === nodeId && edge.destination.field === field);
+
+/** The item sources of a collect chain, first item first. */
+const chainItems = (graph: BackendGraphContract, collectId: string | undefined): GraphNode[] => {
+  const items: GraphNode[] = [];
+  let collect = collectId;
+
+  while (collect) {
+    items.unshift(graph.nodes[edgeInto(graph, collect, 'item')!.source.node_id]!);
+    collect = edgeInto(graph, collect, 'collection')?.source.node_id;
+  }
+
+  return items;
+};
+
+const refMetadata = (graph: BackendGraphContract) =>
+  (
+    coreMetadata(graph).ref_images as {
+      config: { image: { original: { image: { image_name: string } } }; type: string };
+    }[]
+  ).map((ref) => ({ name: ref.config.image.original.image.image_name, type: ref.config.type }));
+
+describe('compileEditGraph for Qwen-Image 2.1', () => {
+  const refs = [reference('b.png'), reference('a.png')];
+
+  it('shows the encoder every image and gives the denoise their latents, the source first', () => {
+    const graph = compileBase('qwen-image-2-1', DIFFUSERS, refs);
+    const shown = chainItems(graph, edgeInto(graph, 'pos_cond', 'reference_images')?.source.node_id);
+    const latents = chainItems(graph, edgeInto(graph, 'denoise_latents', 'reference_latents')?.source.node_id);
+
+    expect(shown.map((node) => (node.image as { image_name: string }).image_name)).toEqual([
+      'source.png',
+      'b.png',
+      'a.png',
+    ]);
+    expect(latents).toHaveLength(3);
+    expect(graph.nodes.denoise_latents).toMatchObject({ height: 1024, type: 'qwen_image_2_1_denoise', width: 1024 });
+  });
+
+  it('records the mode on the denoise record the decode node carries, and the references as Generate does', () => {
+    const graph = compileBase('qwen-image-2-1', DIFFUSERS, refs);
+
+    expect(coreMetadata(graph)).toMatchObject({
+      edit_source_image_name: 'source.png',
+      generation_mode: 'qwen_image_2_1_edit',
+    });
+    expect(edgeInto(graph, 'denoise_latents', 'metadata')?.source.node_id).toBe(coreMetadata(graph).id);
+    expect(edgeInto(graph, 'canvas_output', 'metadata')?.source.node_id).toBe('denoise_latents');
+    expect(graph.nodes.canvas_output).toMatchObject({ is_intermediate: false, type: 'qwen_image_2_1_l2i' });
+    expect(refMetadata(graph)).toEqual([
+      { name: 'source.png', type: 'qwen_image_2_1_reference_image' },
+      { name: 'b.png', type: 'qwen_image_2_1_reference_image' },
+      { name: 'a.png', type: 'qwen_image_2_1_reference_image' },
+    ]);
+  });
+
+  it('takes the source and three references and refuses a fifth image', () => {
+    const three = ['1', '2', '3'].map((name) => reference(`${name}.png`));
+
+    expect(() => compileBase('qwen-image-2-1', DIFFUSERS, three)).not.toThrow();
+    expect(() => compileBase('qwen-image-2-1', DIFFUSERS, [...three, reference('4.png')])).toThrow(
+      /at most 4 reference images/
+    );
+  });
+
+  it("needs the GGUF encoder's vision tower, and loads it when chosen", () => {
+    const withTower = compileBase('qwen-image-2-1', QWEN21_GGUF);
+
+    expect(withTower.nodes.model_loader?.qwen3_vl_vision_tower_model).toBeTruthy();
+    expect(coreMetadata(withTower).qwen3_vl_vision_tower).toBeTruthy();
+    expect(() => compileBase('qwen-image-2-1', QWEN21_GGUF, [], { qwen3VLVisionTowerModel: null })).toThrow(
+      /Vision Tower/
+    );
+  });
+
+  it('refuses a size off the 32 grid', () => {
+    const { model, settings } = satisfiedSettingsFor('qwen-image-2-1', DIFFUSERS);
+
+    expect(() =>
+      compileEditGraph({
+        model,
+        projectSettings: PROJECT,
+        referenceImages: [],
+        settings,
+        size: { height: 1024, width: 1040 },
+        source: { height: 512, image_name: 'source.png', width: 512 },
+      })
+    ).toThrow(/multiple of 32/);
+  });
+});
+
+describe('compileEditGraph for FLUX.3', () => {
+  const KLEIN: ModelShape = { label: 'klein', overrides: { format: 'diffusers', variant: 'flux3_klein' } };
+  const BASE: ModelShape = { label: 'base', overrides: { format: 'diffusers', variant: 'flux3_klein_base' } };
+
+  it('gives the denoise the source first, then the references in order, and marks the boxes as edit targets', () => {
+    const graph = compileBase('flux3', KLEIN, [reference('b.png'), reference('a.png')]);
+
+    expect(conditionedImages(graph)).toEqual(['source.png', 'b.png', 'a.png']);
+    expect(graph.nodes.layout_prompt).toMatchObject({ edit_targets: true, type: 'flux3_layout_prompt' });
+    expect(Object.values(graph.nodes).some((node) => node.type === 'flux3_prompt_upsampler')).toBe(false);
+  });
+
+  it('records the mode, the source and the references with the FLUX.2 reference type Generate uses', () => {
+    const graph = compileBase('flux3', KLEIN, [reference('a.png')]);
+
+    expect(coreMetadata(graph)).toMatchObject({
+      edit_source_image_name: 'source.png',
+      generation_mode: 'flux3_edit',
+      scheduler: 'euler',
+    });
+    expect(refMetadata(graph)).toEqual([
+      { name: 'source.png', type: 'flux2_reference_image' },
+      { name: 'a.png', type: 'flux2_reference_image' },
+    ]);
+    expect(graph.nodes.canvas_output).toMatchObject({ is_intermediate: false, type: 'flux2_vae_decode' });
+  });
+
+  it('takes the source and nine references and refuses an eleventh image', () => {
+    const nine = Array.from({ length: 9 }, (_, index) => reference(`${index}.png`));
+
+    expect(() => compileBase('flux3', KLEIN, nine)).not.toThrow();
+    expect(() => compileBase('flux3', KLEIN, [...nine, reference('9.png')])).toThrow(/at most 10 reference images/);
+  });
+
+  it('runs Klein without negative conditioning and Klein Base with CFG, as Generate does', () => {
+    const klein = compileBase('flux3', KLEIN);
+    const base = compileBase('flux3', BASE);
+
+    expect(klein.nodes.denoise_latents).toMatchObject({ cfg_scale: 1, type: 'flux3_denoise' });
+    expect(klein.nodes.neg_cond).toBeUndefined();
+    expect(base.nodes.denoise_latents?.cfg_scale).toBeGreaterThan(1);
+    expect(base.nodes.neg_cond).toMatchObject({ type: 'flux3_text_encoder' });
+  });
+});
+
 describe('fitToOptimalArea', () => {
   const model = { base: 'flux2', type: 'main' as const, variant: 'dev' };
   const { grid, optimal } = getGenerationDimensions(model);

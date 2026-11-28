@@ -1540,10 +1540,48 @@ describe('executeImageRecall of an Edit workspace image', () => {
 });
 
 // The Edit values a step ran with come back from the record it wrote: compile, recall, compare.
-describe('an Edit record round-trips into Edit', () => {
-  const base = recallTunedSettingsFor('flux2', { label: 'dev', overrides: { format: 'diffusers', variant: 'dev' } });
+describe.each([
   // FLUX.2 runs Euler or Heun; the tuned fixture's scheduler is not one of them and would be recorded as Euler.
-  const tuned = { ...base, settings: { ...base.settings, scheduler: 'heun' } };
+  {
+    base: 'flux2' as const,
+    scheduler: 'heun',
+    shape: { label: 'dev', overrides: { format: 'diffusers', variant: 'dev' } },
+  },
+  {
+    base: 'flux3' as const,
+    scheduler: 'euler',
+    shape: { label: 'klein-base', overrides: { format: 'diffusers', variant: 'flux3_klein_base' } },
+  },
+  {
+    base: 'qwen-image-2-1' as const,
+    scheduler: 'euler',
+    shape: { label: 'diffusers', overrides: { format: 'diffusers' } },
+  },
+  {
+    base: 'qwen-image-2-1' as const,
+    label: 'gguf encoder and vision tower',
+    scheduler: 'euler',
+    shape: { ggufEncoder: true as const, label: 'gguf', overrides: { format: 'gguf_quantized' } },
+  },
+])('an Edit record round-trips into Edit ($base $label)', ({ base: edited, scheduler, shape }) => {
+  const base = recallTunedSettingsFor(edited, shape);
+  // A GGUF encoder runs only beside its Vision Tower, which the tuned fixture leaves out.
+  const components =
+    'ggufEncoder' in shape
+      ? {
+          ...(({ qwen3VLEncoderModel, qwen3VLVisionTowerModel }) => ({ qwen3VLEncoderModel, qwen3VLVisionTowerModel }))(
+            satisfiedSettingsFor(edited, shape).settings
+          ),
+          vae: {
+            base: edited,
+            key: `${edited}-vae`,
+            name: 'vae',
+            type: 'vae' as const,
+            variant: null,
+          },
+        }
+      : {};
+  const tuned = { ...base, settings: { ...base.settings, ...components, scheduler } };
   const extra = { height: 256, image_name: 'extra.png', width: 256 };
   const source = { height: 256, image_name: 'source.png', width: 256 };
   const projectSettings = { useCpuNoise: true, useNsfwChecker: false, useWatermark: false };

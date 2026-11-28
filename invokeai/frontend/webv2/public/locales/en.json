@@ -7117,6 +7117,7 @@
       "rerunReferenceUnavailable": "Image {{number}} of this step is not available, so it cannot run again.",
       "referenceMissing": "This image is not available",
       "unavailable": "Image not available",
+      "referenceTagsHint": "This model names images by tag. Write the tag shown next to an image in your instruction.",
       "referenceRemoved": "Image {{number}} was removed from the references; check your instruction.",
       "referencesChanged": "Edit references changed",
       "imageN": "Image {{number}}",

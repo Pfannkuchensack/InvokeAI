@@ -9,7 +9,7 @@ export {
   clearDeletedInstructReferences,
   removeInstructReference,
 } from './core/references';
-export { MAX_EDIT_DIMENSION, MIN_EDIT_DIMENSION, resolveEditOutputSize, snapEditDimension } from './core/size';
+export { resolveEditOutputSize, snapEditDimension } from './core/size';
 export {
   createDefaultInstructValues,
   getInstructMaxReferenceImages,

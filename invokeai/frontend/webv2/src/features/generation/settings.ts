@@ -72,6 +72,9 @@ export {
   getGenerateModelSelectionResult,
   getModelDefaultComponents,
   getModelDefaultFills,
+  EDIT_BASES,
+  isEditBase,
+  type EditBase,
   isComponentCompatibleWithModel,
   getDimensionGrid,
   getGenerationDimensions,
@@ -205,3 +208,12 @@ export {
   type ProjectPromptDraftPatch,
 } from './core/projectPromptDraft';
 export { generatedImageToReferenceImage, getEffectiveReferenceImage } from './core/referenceImage';
+export {
+  EDIT_FAMILY_INFO,
+  EDIT_SETTINGS,
+  fitToOptimalArea,
+  getEditReferenceImages,
+  getEditValidationIssues,
+  toEditMessage,
+  type EditGraphSettings,
+} from './core/edit/editContract';

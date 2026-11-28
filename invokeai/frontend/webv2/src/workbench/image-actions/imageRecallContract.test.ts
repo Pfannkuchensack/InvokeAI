@@ -31,10 +31,12 @@ import { compileEditGraph } from '@features/generation/editGraph';
 import { compileGenerateGraph } from '@features/generation/graph';
 import {
   deriveAspectRatioId,
+  type EditBase,
   getDefaultGenerateSettings,
   getEffectivePrompts,
   getExternalResolutionPresets,
   getGenerationUiPolicy,
+  isEditBase,
   isSupportedGenerateModel,
   isVaeModelConfig,
   normalizeReferenceImages,
@@ -307,7 +309,7 @@ const IMAGE_RECALL_CONTRACT = {
 
   edit_source_image_name: {
     consumed:
-      'With `generation_mode: flux2_edit` it sends Recall All and Remix to Edit (the source is the continue point; ' +
+      'With an Edit `generation_mode` (`flux2_edit`, `flux3_edit`, `qwen_image_2_1_edit`) it sends Recall All and Remix to Edit (the source is the continue point; ' +
       '`ref_images` minus the source are the extra references). Recall into Generate reproduces the run from ' +
       '`ref_images`, which lists the source first.',
   },
@@ -528,7 +530,13 @@ const generateCase = ({ label, model, settings }: SettingsFixture, baseline: Gen
   tuned: { ...settings, model },
 });
 
-/** An Edit step records itself as FLUX.2 text-to-image with the source first, which Generate recalls as it is. */
+const EDIT_REFERENCE_TYPES = {
+  flux2: 'flux2_reference_image',
+  flux3: 'flux2_reference_image',
+  'qwen-image-2-1': 'qwen_image_2_1_reference_image',
+} as const satisfies Record<EditBase, string>;
+
+/** An Edit step records itself as its family's text-to-image with the source first, which Generate recalls as it is. */
 const editCase = ({ label, model, settings }: SettingsFixture, baseline: GenerateWidgetValues): RecallCase => {
   const caseLabel = `${label} / edit`;
   const size = { height: settings.height, width: settings.width };
@@ -549,7 +557,7 @@ const editCase = ({ label, model, settings }: SettingsFixture, baseline: Generat
   // record's, which the compiler mints.
   const recordedIds = (record.ref_images as { id: string }[]).map(({ id }) => id);
   const referenceImages = [source, extra].map((image, index) => ({
-    config: { image: { original: { image } }, type: 'flux2_reference_image' as const },
+    config: { image: { original: { image } }, type: EDIT_REFERENCE_TYPES[model.base as EditBase] },
     id: recordedIds[index]!,
     isEnabled: true,
   }));
@@ -682,7 +690,7 @@ const buildCases = (): RecallCase[] => {
     (fixture, index) => tunedShapes.findIndex((other) => other.model.base === fixture.model.base) === index
   );
   const fixtureFor = (base: string) => firstShapes.find((fixture) => fixture.model.base === base)!;
-  const edit = tunedShapes.filter(({ model }) => model.base === 'flux2').map((fixture) => editCase(fixture, baseline));
+  const edit = tunedShapes.filter(({ model }) => isEditBase(model.base)).map((fixture) => editCase(fixture, baseline));
   const canvas = firstShapes.flatMap((fixture) =>
     canvasModesFor(fixture.model, fixture.settings).map((mode) => canvasCase(fixture, mode, baseline))
   );
